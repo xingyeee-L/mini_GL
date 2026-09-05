@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.token
+
+# Private and derived data
+data/*
+!data/.gitkeep
+*.sqlite
+*.sqlite3
+*.db
+*.index
+*.faiss
+*.qdrant
+models/
+
+# User exports and common chat artifacts
+exports/
+chat_exports/
+wechat_exports/
+qq_exports/
+*.bak
+*.log
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
