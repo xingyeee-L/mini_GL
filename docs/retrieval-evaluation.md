@@ -50,7 +50,28 @@ Each synthetic case contains:
 - Algorithm: deterministic BM25 over paragraph-based chunks.
 - Chinese tokenization: CJK unigrams and bigrams; Latin text uses lowercase word tokens.
 - Weak-match control: at least 35% of distinct query terms must occur in a candidate.
-- Synthetic baseline: Recall@5 = 1.0, Recall@10 = 1.0, MRR = 1.0 on the initial two-query set.
+- Smoke baseline: Recall@5 = 1.0, Recall@10 = 1.0, MRR = 1.0 on the initial two-query set.
 - Scope isolation: a query restricted to one source returns zero results from other sources.
 - The initial fixture is deliberately small; expand it before using these numbers for model or
   product comparisons.
+
+## Expanded Chinese benchmark
+
+The version-one synthetic benchmark contains 15 fictional documents and 25 natural-language
+queries. It covers path security, read-only behavior, change events, rollback, encodings, SQLite,
+crash recovery, lexical search, evaluation, privacy, canonical documents, scan limits, and the
+local console. Two documents live in a separate restricted source to verify source isolation.
+
+Observed lexical baseline on 2026-09-07:
+
+- Recall@5: 0.46
+- Recall@10: 0.46
+- MRR: 0.38
+- Forbidden-result rate: 0.0
+- P50 latency: approximately 0.36 ms
+- P95 latency: approximately 0.54 ms
+
+The large drop from the two-query smoke set is expected and useful. Exact terminology performs
+well, while colloquial paraphrases and synonyms expose the semantic limitations of lexical-only
+retrieval. The test gate is intentionally below the product target and exists to detect regression;
+phase 3 hybrid retrieval must improve this expanded benchmark without increasing forbidden results.
