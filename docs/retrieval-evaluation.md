@@ -45,3 +45,12 @@ Each synthetic case contains:
 - Phase 3: hybrid retrieval exceeds lexical and vector-only baselines on the project set.
 - Phase 4: every factual answer is cited or explicitly unsupported.
 
+## Phase 2 baseline
+
+- Algorithm: deterministic BM25 over paragraph-based chunks.
+- Chinese tokenization: CJK unigrams and bigrams; Latin text uses lowercase word tokens.
+- Weak-match control: at least 35% of distinct query terms must occur in a candidate.
+- Synthetic baseline: Recall@5 = 1.0, Recall@10 = 1.0, MRR = 1.0 on the initial two-query set.
+- Scope isolation: a query restricted to one source returns zero results from other sources.
+- The initial fixture is deliberately small; expand it before using these numbers for model or
+  product comparisons.

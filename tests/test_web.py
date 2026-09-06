@@ -48,7 +48,7 @@ class WebAcceptanceTests(unittest.TestCase):
     def test_page_and_privacy_safe_file_status(self) -> None:
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             page = response.read().decode()
-        self.assertIn("阶段 1 验收台", page)
+        self.assertIn("本地数据与搜索验收台", page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)

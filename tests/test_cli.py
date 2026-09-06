@@ -30,6 +30,12 @@ class CliTests(unittest.TestCase):
             payload = json.loads(status)
             self.assertEqual(payload[0]["file_count"], 1)
             self.assertNotIn("hello", status)
+            code, indexed = self._invoke("index", source_id, "--db", str(db))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(indexed)["chunks"], 1)
+            code, searched = self._invoke("search", "hello", "--db", str(db))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(searched)["results"][0]["title"], "hello.txt")
 
     def test_rejects_limits_above_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

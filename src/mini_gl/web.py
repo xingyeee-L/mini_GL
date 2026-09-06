@@ -10,9 +10,10 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from mini_gl.ingestion import IngestionService
+from mini_gl.retrieval.lexical import LexicalSearchService
 from mini_gl.storage.sqlite import SQLiteStore
 
 PAGE = """<!doctype html>
@@ -27,12 +28,13 @@ button{cursor:pointer}button.primary{background:#202124;color:#fff}.flow,.metric
 .flow b{display:block;color:#187442}.metrics{grid-template-columns:repeat(4,1fr)}.metric strong{display:block;font-size:24px}.metric span{color:#666}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #eee}th{color:#666;font-weight:500}.error{color:#b3261e}.muted{color:#666}
 @media(max-width:650px){.flow{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.table{overflow:auto}}
-</style></head><body><header class="top"><h1>🧠 mini_GL · 阶段 1 验收台</h1><span class="safe">🛡 只读 · 仅本机</span></header>
+</style></head><body><header class="top"><h1>🧠 mini_GL · 本地数据与搜索验收台</h1><span class="safe">🛡 只读 · 仅本机</span></header>
 <main><section class="panel"><h2>1. 注册测试资料目录</h2><form id="register" class="row"><label>目录绝对路径<input name="root" required placeholder="C:\\path\\to\\test-files"></label><button class="primary">注册</button></form></section>
-<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
+<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
 <section class="panel"><div class="flow"><div><b>✓</b>授权目录</div><div><b>✓</b>安全扫描</div><div><b>✓</b>文本解析</div><div><b>✓</b>标准化</div><div><b>✓</b>原子保存</div></div></section>
 <section class="panel"><h2>3. 最近一次同步结果</h2><div class="metrics"><div class="metric"><span>新增</span><strong id="created">0</strong></div><div class="metric"><span>更新</span><strong id="updated">0</strong></div><div class="metric"><span>未变化</span><strong id="unchanged">0</strong></div><div class="metric"><span>删除</span><strong id="deleted">0</strong></div></div></section>
 <section class="panel"><h2>4. 文件状态（不显示正文）</h2><div class="table"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>
+<section class="panel"><h2>5. 中文关键词检索</h2><form id="search-form" class="row"><label>查询<input name="query" required placeholder="例如：项目安全边界"></label><label>文件类型<select name="file_type"><option value="">全部</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select></label><button class="primary">搜索</button></form><p id="search-status" class="muted" aria-live="polite">请先重建关键词索引。</p><div class="table"><table><thead><tr><th>来源</th><th>相关片段</th><th>分数</th></tr></thead><tbody id="results"></tbody></table></div></section>
 </main><script>
 const token=__TOKEN__;const el=id=>document.getElementById(id);let sources=[];
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-Mini-GL-CSRF':token};const r=await fetch(path,options);const data=await r.json();if(!r.ok)throw new Error(data.message||'操作失败');return data}
@@ -42,6 +44,8 @@ async function detail(){const id=el('sources').value;if(!id){el('message').textC
 function escapeHtml(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
 el('register').addEventListener('submit',async e=>{e.preventDefault();try{const root=new FormData(e.target).get('root');await api('/api/register',{method:'POST',body:JSON.stringify({root})});await load(false)}catch(x){el('message').textContent=x.message;el('message').className='error'}});
 el('sync').addEventListener('click',async()=>{try{el('message').textContent='正在安全扫描并同步…';const id=el('sources').value;await api('/api/sync',{method:'POST',body:JSON.stringify({source_id:id})});await detail()}catch(x){el('message').textContent='同步已回滚：'+x.message;el('message').className='error'}});el('refresh').onclick=()=>load();el('sources').onchange=detail;load();
+el('index').addEventListener('click',async()=>{try{const id=el('sources').value;const out=await api('/api/index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`索引完成：${out.documents} 个文档，${out.chunks} 个片段`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
+el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const out=await api('/api/search?'+params);el('search-status').textContent=`找到 ${out.results.length} 条结果 · ${out.elapsed_ms} ms`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');for(const value of [r.title+' · '+r.file_type,r.snippet,r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
 </script></body></html>"""
 
 
@@ -104,6 +108,14 @@ class Handler(BaseHTTPRequestHandler):
                     source_id = path.removeprefix("/api/source/")
                     status = store.status(source_id)[0]
                     self._json({"status": status, "files": store.file_status(source_id), "events": store.latest_events(source_id)})
+                elif path == "/api/search":
+                    query = parse_qs(urlparse(self.path).query)
+                    result = LexicalSearchService(store).search(
+                        query.get("q", [""])[0],
+                        source_id=query.get("source_id", [None])[0],
+                        file_type=query.get("file_type", [None])[0],
+                    )
+                    self._json(result)
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -122,6 +134,8 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"source_id": source.source_id})
                 elif self.path == "/api/sync":
                     self._json(service.sync(str(body["source_id"])))
+                elif self.path == "/api/index":
+                    self._json(LexicalSearchService(store).rebuild(str(body["source_id"])))
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:

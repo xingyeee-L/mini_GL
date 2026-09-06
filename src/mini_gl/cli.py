@@ -25,10 +25,18 @@ def build_parser() -> argparse.ArgumentParser:
     sync.add_argument("source_id")
     status = subparsers.add_parser("status", help="Show privacy-safe ingestion status")
     status.add_argument("source_id", nargs="?")
+    index = subparsers.add_parser("index", help="Rebuild the local lexical index")
+    index.add_argument("source_id", nargs="?")
+    search = subparsers.add_parser("search", help="Search indexed documents")
+    search.add_argument("query")
+    search.add_argument("--source-id")
+    search.add_argument("--file-type", choices=(".txt", ".md"))
+    search.add_argument("--updated-after")
+    search.add_argument("--limit", type=int, default=10)
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
-    for command in (register, sync, status, serve):
+    for command in (register, sync, status, index, search, serve):
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
     return parser
 
@@ -48,8 +56,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps({"source_id": source.source_id, "root": str(source.root_path)}))
             elif args.command == "sync":
                 print(json.dumps(service.sync(args.source_id), sort_keys=True))
-            else:
+            elif args.command == "status":
                 print(json.dumps(store.status(args.source_id), ensure_ascii=False, indent=2))
+            else:
+                from mini_gl.retrieval.lexical import LexicalSearchService
+
+                retrieval = LexicalSearchService(store)
+                if args.command == "index":
+                    print(json.dumps(retrieval.rebuild(args.source_id), sort_keys=True))
+                else:
+                    result = retrieval.search(
+                        args.query,
+                        source_id=args.source_id,
+                        file_type=args.file_type,
+                        updated_after=args.updated_after,
+                        limit=args.limit,
+                    )
+                    print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))

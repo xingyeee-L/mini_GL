@@ -80,4 +80,14 @@ Development dependencies are declared in `pyproject.toml`, but Phase 0 verificat
 
 ## Next milestone
 
-Phase 2 will add a rebuildable lexical index and deterministic search over the canonical documents.
+Phase 2 provides a rebuildable BM25 lexical index with lowercase word tokens and Chinese
+unigrams/bigrams. Search preserves stable chunk and document IDs, source paths, snippets, file
+types, timestamps, scores, and measured query latency.
+
+```powershell
+python -m mini_gl index <source-id>
+python -m mini_gl search "安全边界" --source-id <source-id>
+```
+
+The search command also supports `--file-type`, `--updated-after`, and `--limit`. The visual
+console exposes the same indexing and search service without sending data over the network.
