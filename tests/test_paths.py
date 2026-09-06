@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,7 +42,39 @@ class PathPolicyTests(unittest.TestCase):
             with self.assertRaises(PathPolicyError):
                 policy.authorize(source)
 
+    def test_rejects_oversized_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "large.txt"
+            source.write_bytes(b"12345")
+            policy = PathPolicy((root,), frozenset({".txt"}), max_file_size=4)
+            with self.assertRaises(PathPolicyError):
+                policy.authorize(source)
+
+    def test_rejects_excessive_depth(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source = root / "one" / "two" / "notes.txt"
+            source.parent.mkdir(parents=True)
+            source.write_text("synthetic", encoding="utf-8")
+            policy = PathPolicy((root,), frozenset({".txt"}), max_depth=1)
+            with self.assertRaises(PathPolicyError):
+                policy.authorize(source)
+
+    def test_rejects_symbolic_link(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target.txt"
+            link = root / "link.txt"
+            target.write_text("synthetic", encoding="utf-8")
+            try:
+                os.symlink(target, link)
+            except OSError:
+                self.skipTest("Creating symlinks is not permitted on this Windows installation")
+            policy = PathPolicy((root,), frozenset({".txt"}))
+            with self.assertRaises(PathPolicyError):
+                policy.authorize(link)
+
 
 if __name__ == "__main__":
     unittest.main()
-

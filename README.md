@@ -2,14 +2,15 @@
 
 mini_GL is a local-first personal knowledge retrieval and question-answering project. The first milestone establishes the product boundaries, privacy rules, architecture, data contracts, and a testable Python skeleton.
 
-## Phase 0 status
+## Phase 1 status
 
-- Product scope and acceptance criteria are documented.
-- The architecture is a modular monolith with replaceable connectors, indexes, and model providers.
-- Source data is read-only; derived data must be rebuildable.
-- Real chat records and private files are excluded from the repository and from coding-agent context.
-- Only synthetic fixtures are used in automated tests.
-- No model, vector database, network service, telemetry, or chat-client extraction is implemented yet.
+- Explicit local source roots can be registered through the CLI.
+- TXT and Markdown are scanned through extension, size, depth, and path-boundary policies.
+- Symbolic links and Windows reparse points fail closed.
+- UTF-8, BOM-marked UTF-16, and GB18030 content is normalized into `SourceDocument`.
+- SQLite stores sources, sync runs, file snapshots, documents, and idempotent change events.
+- A failed scan never advances the snapshot or emits false deletion events.
+- No model, vector index, network service, telemetry, or chat-client extraction is implemented yet.
 
 ## Safety boundary
 
@@ -45,9 +46,38 @@ python -m unittest discover -s tests -p "test_*.py"
 python -m compileall -q src tests
 ```
 
+## Phase 1 CLI
+
+The default database is `data/mini_gl.sqlite3`. Start with a disposable directory containing
+only non-sensitive test files:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m mini_gl register C:\path\to\authorized-test-files
+python -m mini_gl sync <source-id>
+python -m mini_gl status <source-id>
+```
+
+`register` accepts `--max-size` in bytes and `--max-depth`; both may only reduce the built-in
+limits of 10 MiB and eight nested directories. `status` reports paths and operational metadata,
+but never document content.
+
+## Visual acceptance console
+
+Start the local-only console and open `http://127.0.0.1:8765` in a browser:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m mini_gl serve
+```
+
+The console registers an explicitly selected test directory, runs the same ingestion service as
+the CLI, and displays event counts, file paths, sizes, shortened hashes, and run status. It never
+returns document contents to the browser, requires a per-process request token, and only binds to
+the loopback interface.
+
 Development dependencies are declared in `pyproject.toml`, but Phase 0 verification intentionally works with the Python standard library.
 
 ## Next milestone
 
-Phase 1 will implement a read-only TXT/Markdown vertical slice: allowlisted directory scan, path validation, SHA-256 change detection, canonical normalization, SQLite sync state, deletion events, and source-preserving tests.
-
+Phase 2 will add a rebuildable lexical index and deterministic search over the canonical documents.

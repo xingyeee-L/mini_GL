@@ -42,7 +42,10 @@ A citation contains source document ID, chunk ID, source URI, display title, and
 
 Connectors emit `created`, `updated`, `unchanged`, or `deleted` with a source ID, object ID, observed version/hash, and observation time. Applying the same event twice must not change the final state.
 
+For local files, `object_id` is SHA-256 over the source ID and a case-folded POSIX-style relative
+path. A rename is therefore represented as `deleted` plus `created`. Content hashes are SHA-256
+over the exact source bytes; decoding and newline normalization do not affect change detection.
+
 ## Intermediate chat export
 
 Future QQ/WeChat import tools must first produce a versioned neutral JSON document. The core application consumes that schema and does not depend directly on private client databases.
-

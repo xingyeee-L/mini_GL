@@ -1,6 +1,6 @@
 """Canonical domain models."""
 
-from .models import Citation, ChatMessage, SearchChunk, SourceDocument
+from .models import ChatMessage, Citation, SearchChunk, SourceDocument
 
 __all__ = ["Citation", "ChatMessage", "SearchChunk", "SourceDocument"]
 
