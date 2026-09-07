@@ -48,4 +48,7 @@ over the exact source bytes; decoding and newline normalization do not affect ch
 
 ## Intermediate chat export
 
-Future QQ/WeChat import tools must first produce a versioned neutral JSON document. The core application consumes that schema and does not depend directly on private client databases.
+QQ/WeChat import tools must first produce a versioned neutral JSON document. The core application
+consumes that schema and does not depend directly on private client databases. Version `1.0` is
+specified in `phase5-chat-import-plan.md`; timestamps require explicit timezones, reply targets are
+local to one export, attachment references are inert, and withdrawn message text is discarded.

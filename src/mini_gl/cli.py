@@ -81,6 +81,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
+    chat_import = subparsers.add_parser(
+        "chat-import", help="Import a provider-neutral versioned chat JSON export"
+    )
+    chat_import.add_argument("path", type=Path)
     commands = (
         register,
         sync,
@@ -92,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
         hybrid,
         ask,
         serve,
+        chat_import,
     )
     for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -110,7 +115,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         with SQLiteStore(args.db) as store:
             service = IngestionService(store)
-            if args.command == "register":
+            if args.command == "chat-import":
+                from mini_gl.chat_import import ChatImportService
+
+                print(
+                    json.dumps(
+                        ChatImportService(store).import_file(args.path),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+            elif args.command == "register":
                 source = service.register(args.root, args.max_size, args.max_depth)
                 print(json.dumps({"source_id": source.source_id, "root": str(source.root_path)}))
             elif args.command == "sync":
