@@ -15,11 +15,26 @@ from mini_gl.storage.sqlite import SQLiteStore
 
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]+")
 _WORD = re.compile(r"[a-zA-Z0-9_]+")
+_TECHNICAL_SEPARATOR = re.compile(r"(?<=[a-z0-9])[-_.](?=[a-z0-9])")
+_QUESTION_NOISE = (
+    "会不会",
+    "是不是",
+    "应该怎么",
+    "如何",
+    "怎么",
+    "哪些",
+    "什么",
+    "是否",
+    "一个",
+    "我的",
+)
 
 
 def tokenize(text: str) -> list[str]:
     """Create lowercase words plus Chinese unigrams and bigrams."""
-    normalized = text.casefold()
+    normalized = _TECHNICAL_SEPARATOR.sub("", text.casefold())
+    for phrase in _QUESTION_NOISE:
+        normalized = normalized.replace(phrase, " ")
     tokens = _WORD.findall(normalized)
     for run in _CJK.findall(normalized):
         tokens.extend(run)
@@ -80,7 +95,8 @@ class LexicalSearchService:
                 content_hash = hashlib.sha256(content.encode()).hexdigest()
                 identity = f"{document['document_id']}\0{ordinal}\0{content_hash}"
                 chunk_id = hashlib.sha256(identity.encode()).hexdigest()
-                terms = tokenize(f"{document['title']} {content}")
+                title_terms = tokenize(document["title"])
+                terms = [*title_terms, *title_terms, *tokenize(content)]
                 rows.append(
                     (
                         chunk_id,
@@ -143,8 +159,9 @@ class LexicalSearchService:
         average_length = sum(row["token_count"] for row in rows) / len(rows)
         ranked: list[SearchResult] = []
         for row, frequencies_for_row in zip(rows, frequencies, strict=True):
-            matched_terms = sum(1 for term in query_terms if term in frequencies_for_row)
-            if matched_terms / len(query_terms) < 0.35:
+            if _weighted_coverage(
+                query_terms, frequencies_for_row, document_frequency, len(rows)
+            ) < 0.12:
                 continue
             score = _bm25(
                 query_terms,
@@ -195,6 +212,23 @@ def _bm25(
         denominator = frequency + 1.2 * (1 - 0.75 + 0.75 * length / average_length)
         score += inverse_frequency * frequency * 2.2 / denominator * query_frequency
     return score
+
+
+def _weighted_coverage(
+    query: Counter[str],
+    document: dict[str, int],
+    document_frequency: dict[str, int],
+    count: int,
+) -> float:
+    informative = [term for term in query if len(term) > 1 or term.isascii()]
+    if not informative:
+        informative = list(query)
+    weights = {
+        term: 1 + math.log((count + 1) / (document_frequency.get(term, 0) + 1))
+        for term in informative
+    }
+    total = sum(weights.values())
+    return sum(weight for term, weight in weights.items() if term in document) / total
 
 
 def _snippet(content: str, query: str, width: int = 180) -> str:

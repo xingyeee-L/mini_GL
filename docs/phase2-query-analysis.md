@@ -55,6 +55,22 @@ without raising the forbidden-result rate above zero.
 
 ## Reproduction
 
+## Implemented lexical improvement
+
+The phase 2 changes were applied with the benchmark frozen:
+
+- normalize punctuation inside technical identifiers, such as `UTF-16` → `utf16`;
+- remove a small documented set of question-form noise phrases;
+- exclude single Han characters from candidate gating when longer terms exist;
+- use IDF-weighted informative-term coverage with a conservative threshold;
+- index title terms with additional weight.
+
+Recall@5 and Recall@10 improved from 0.46 to 0.66 and MRR improved from 0.38 to 0.56. The
+forbidden-result rate stayed at zero. Remaining misses predominantly require semantic relations or
+cross-document evidence and therefore remain unchanged for phase 3.
+
+## Reproduction
+
 Run the detailed diagnostic from the repository root:
 
 ```powershell

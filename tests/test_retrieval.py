@@ -38,6 +38,8 @@ class LexicalRetrievalTests(unittest.TestCase):
 
     def test_chinese_tokenization_and_ranking(self) -> None:
         self.assertIn("安全", tokenize("安全设计"))
+        self.assertIn("utf16", tokenize("UTF-16 编码"))
+        self.assertNotIn("如何", tokenize("如何保护文件"))
         result = self.search.search("如何拒绝符号链接", source_id=self.source.source_id)
         rows = result["results"]
         self.assertIsInstance(rows, list)

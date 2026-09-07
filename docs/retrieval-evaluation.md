@@ -75,3 +75,16 @@ The large drop from the two-query smoke set is expected and useful. Exact termin
 well, while colloquial paraphrases and synonyms expose the semantic limitations of lexical-only
 retrieval. The test gate is intentionally below the product target and exists to detect regression;
 phase 3 hybrid retrieval must improve this expanded benchmark without increasing forbidden results.
+
+After technical-token normalization, question-noise removal, title weighting, and IDF-weighted
+informative-term coverage were added without changing the fixture:
+
+- Recall@5: 0.66 (previously 0.46)
+- Recall@10: 0.66 (previously 0.46)
+- MRR: 0.56 (previously 0.38)
+- Forbidden-result rate: 0.0 (unchanged)
+- P50 latency: approximately 0.39 ms
+- P95 latency: approximately 0.49 ms
+
+The remaining misses are retained as phase 3 semantic targets rather than encoded into a
+benchmark-specific synonym table.

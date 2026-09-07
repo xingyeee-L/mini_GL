@@ -48,9 +48,9 @@ class ChineseRetrievalBenchmarkTests(unittest.TestCase):
                 ]
                 metrics = evaluate(search, queries, source_id=allowed_source.source_id)
 
-        # These are regression gates for the honest lexical baseline, not target quality.
-        self.assertGreaterEqual(metrics["recall_at_5"], 0.40, metrics)
-        self.assertGreaterEqual(metrics["recall_at_10"], 0.40, metrics)
-        self.assertGreaterEqual(metrics["mrr"], 0.30, metrics)
+        # These are regression gates for the improved lexical baseline, not target quality.
+        self.assertGreaterEqual(metrics["recall_at_5"], 0.60, metrics)
+        self.assertGreaterEqual(metrics["recall_at_10"], 0.60, metrics)
+        self.assertGreaterEqual(metrics["mrr"], 0.50, metrics)
         self.assertEqual(metrics["forbidden_result_rate"], 0.0)
         self.assertGreaterEqual(metrics["p95_ms"], metrics["p50_ms"])
