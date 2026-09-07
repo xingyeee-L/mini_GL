@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from mini_gl.ingestion import IngestionService
-from mini_gl.retrieval.evaluation import EvaluationQuery, evaluate
+from mini_gl.retrieval.evaluation import EvaluationQuery, diagnose, evaluate
 from mini_gl.retrieval.lexical import LexicalSearchService, tokenize
 from mini_gl.storage.sqlite import SQLiteStore
 
@@ -81,3 +81,12 @@ class LexicalRetrievalTests(unittest.TestCase):
         self.assertEqual(metrics["forbidden_result_rate"], 0.0)
         self.assertGreaterEqual(metrics["p50_ms"], 0.0)
         self.assertGreaterEqual(metrics["p95_ms"], metrics["p50_ms"])
+
+    def test_diagnosis_explains_semantic_miss(self) -> None:
+        details = diagnose(
+            self.search,
+            [EvaluationQuery("断电续跑", frozenset({"security.md"}))],
+            source_id=self.source.source_id,
+        )
+        self.assertIn(details[0]["category"], {"lexical_gap", "semantic_gap"})
+        self.assertIsNone(details[0]["rank"])

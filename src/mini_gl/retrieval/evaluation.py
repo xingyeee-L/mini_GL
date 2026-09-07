@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
 from typing import cast
 
-from mini_gl.retrieval.lexical import LexicalSearchService
+from mini_gl.retrieval.lexical import LexicalSearchService, tokenize
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,3 +72,53 @@ def _percentile(values: list[float], quantile: float) -> float:
     upper = min(lower + 1, len(ordered) - 1)
     fraction = position - lower
     return ordered[lower] * (1 - fraction) + ordered[upper] * fraction
+
+
+def diagnose(
+    service: LexicalSearchService,
+    queries: Iterable[EvaluationQuery],
+    *,
+    source_id: str,
+) -> list[dict[str, object]]:
+    """Explain misses as ranking, lexical-coverage, or semantic gaps."""
+    chunks = service.store.connection.execute(
+        "SELECT title,terms_json FROM lexical_chunks WHERE source_id=?", (source_id,)
+    ).fetchall()
+    terms_by_title: dict[str, set[str]] = {}
+    for chunk in chunks:
+        terms_by_title.setdefault(chunk["title"], set()).update(
+            json.loads(chunk["terms_json"]).keys()
+        )
+    details: list[dict[str, object]] = []
+    for case in queries:
+        response = service.search(case.query, source_id=source_id, limit=10)
+        results = cast(list[dict[str, object]], response["results"])
+        titles = [str(result["title"]) for result in results]
+        ranks = [titles.index(title) + 1 for title in case.relevant_titles if title in titles]
+        query_terms = set(tokenize(case.query))
+        coverage = max(
+            (
+                len(query_terms & terms_by_title.get(title, set())) / len(query_terms)
+                for title in case.relevant_titles
+            ),
+            default=0.0,
+        )
+        if ranks:
+            category = "retrieved"
+        elif coverage >= 0.35:
+            category = "ranking_gap"
+        elif coverage > 0:
+            category = "lexical_gap"
+        else:
+            category = "semantic_gap"
+        details.append(
+            {
+                "query": case.query,
+                "expected": sorted(case.relevant_titles),
+                "rank": min(ranks) if ranks else None,
+                "top_result": titles[0] if titles else None,
+                "term_coverage": round(coverage, 3),
+                "category": category,
+            }
+        )
+    return details
