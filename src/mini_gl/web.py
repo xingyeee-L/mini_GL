@@ -40,10 +40,12 @@ button{cursor:pointer}button.primary{background:#202124;color:#fff}.flow,.metric
 .flow b{display:block;color:#187442}.metrics{grid-template-columns:repeat(4,1fr)}.metric strong{display:block;font-size:24px}.metric span{color:#666}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;border-bottom:1px solid #eee}th{color:#666;font-weight:500}.error{color:#b3261e}.muted{color:#666}
 .answer{font-size:17px;line-height:1.75;white-space:pre-wrap;background:#f7f8f9;border-left:4px solid #187442;padding:16px;border-radius:8px}.answer.insufficient{border-color:#b26a00;background:#fff8e8}.answer-meta{display:flex;gap:18px;flex-wrap:wrap;margin:12px 0;color:#666}.citations{display:grid;gap:10px}.citation{border:1px solid #e2e5e9;border-radius:9px;padding:12px;display:flex;justify-content:space-between;gap:12px;align-items:center}.badge{font-size:12px;background:#e7f4ec;color:#126536;padding:3px 7px;border-radius:999px}
-@media(max-width:650px){.flow{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.table{overflow:auto}}
+.privacy{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.privacy div{border:1px solid #dfe8e2;background:#f4faf6;border-radius:9px;padding:12px}.privacy strong,.privacy span{display:block}.privacy span{color:#5f6b64;font-size:13px;margin-top:4px}.source-kind{font-size:12px;color:#187442}.notice{padding:12px;border-radius:8px;background:#eef4ff;color:#315a91}
+@media(max-width:650px){.flow,.privacy{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.table{overflow:auto}}
 </style></head><body><header class="top"><h1>🧠 mini_GL · 本地数据与搜索验收台</h1><span class="safe">🛡 只读 · 仅本机</span></header>
-<main><section class="panel"><h2>1. 注册测试资料目录</h2><form id="register" class="row"><label>目录绝对路径<input name="root" required placeholder="C:\\path\\to\\test-files"></label><button class="primary">注册</button></form><hr><form id="chat-import" class="row"><label>中立聊天 JSON 绝对路径<input name="path" required placeholder="C:\\path\\to\\neutral-chat.json"></label><label><span>使用授权确认</span><span><input name="authorized" type="checkbox" required> 我确认自己有权使用这份导出文件</span></label><button>只读导入聊天记录</button></form><p id="chat-status" class="muted">仅接受版本化中立 JSON；不读取或解密聊天客户端数据库。</p></section>
-<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="vector-index">构建 BGE 本地向量索引</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
+<main><section class="panel"><h2>运行与隐私状态</h2><div class="privacy"><div><strong>仅本机访问</strong><span id="network-state">127.0.0.1</span></div><div><strong>本地向量模型</strong><span id="embedding-state">BGE-small-zh</span></div><div><strong>本地回答模型</strong><span id="model-state">正在检查…</span></div><div><strong>原始资料</strong><span>只读，不移动、不删除</span></div></div><p class="notice">真实 QQ/微信数据尚未开放；当前聊天适配器只用于虚构合成格式。</p></section>
+<section class="panel"><h2>1. 添加数据源</h2><form id="register" class="row"><label>TXT/Markdown 资料目录<input name="root" required placeholder="C:\\path\\to\\test-files"></label><button class="primary">注册</button></form><hr><form id="chat-import" class="row"><label>中立聊天 JSON 绝对路径<input name="path" required placeholder="C:\\path\\to\\neutral-chat.json"></label><label><span>使用授权确认</span><span><input name="authorized" type="checkbox" required> 我确认自己有权使用这份导出文件</span></label><button>只读导入聊天记录</button></form><p id="chat-status" class="muted">仅接受版本化中立 JSON；不读取或解密聊天客户端数据库。</p></section>
+<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="vector-index">构建 BGE 本地向量索引</button><button id="pause">暂停数据源</button><button id="delete-derived">删除派生数据</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
 <section class="panel"><div class="flow"><div><b>✓</b>授权目录</div><div><b>✓</b>安全扫描</div><div><b>✓</b>文本解析</div><div><b>✓</b>标准化</div><div><b>✓</b>原子保存</div></div></section>
 <section class="panel"><h2>3. 最近一次同步结果</h2><div class="metrics"><div class="metric"><span>新增</span><strong id="created">0</strong></div><div class="metric"><span>更新</span><strong id="updated">0</strong></div><div class="metric"><span>未变化</span><strong id="unchanged">0</strong></div><div class="metric"><span>删除</span><strong id="deleted">0</strong></div></div></section>
 <section class="panel"><h2>4. 文件状态（不显示正文）</h2><div class="table"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>
@@ -54,12 +56,15 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;bor
 const token=__TOKEN__;const el=id=>document.getElementById(id);let sources=[];
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-Mini-GL-CSRF':token};const r=await fetch(path,options);const data=await r.json();if(!r.ok)throw new Error(data.message||'操作失败');return data}
 function counts(events){const out={created:0,updated:0,unchanged:0,deleted:0};for(const e of events)if(e.kind in out)out[e.kind]++;return out}
-async function load(keep=true){sources=await api('/api/sources');const old=el('sources').value;el('sources').replaceChildren(...sources.map(s=>{const option=document.createElement('option');option.value=s.source_id;option.textContent=s.root_path;return option}));if(keep&&sources.some(s=>s.source_id===old))el('sources').value=old;await detail()}
-async function detail(){const id=el('sources').value;if(!id){el('message').textContent='请先注册一个测试资料目录。';el('files').innerHTML='';return}const d=await api('/api/source/'+encodeURIComponent(id));const c=counts(d.events);for(const k of Object.keys(c))el(k).textContent=c[k];const map=Object.fromEntries(d.events.map(e=>[e.object_id,e.kind]));el('files').innerHTML=d.files.map(f=>`<tr><td>${escapeHtml(f.relative_path)}</td><td>${f.size} B</td><td>${f.content_hash.slice(0,12)}…</td><td>${map[f.object_id]||'—'}</td></tr>`).join('');const run=d.status.latest_run;el('message').textContent=run?`最近状态：${run.status} · 文件 ${d.files.length} 个 · 原文件不会被修改`:'尚未同步'}
+function sourceKind(s){return s.allowed_extensions.includes('.json')?'聊天 JSON':'本地文件'}
+async function load(keep=true){const [runtime,list]=await Promise.all([api('/api/runtime'),api('/api/sources')]);sources=list;el('network-state').textContent=runtime.network;el('model-state').textContent=runtime.chat_model;const old=el('sources').value;el('sources').replaceChildren(...sources.map(s=>{const option=document.createElement('option');option.value=s.source_id;option.textContent=`[${sourceKind(s)}] ${s.root_path}`;return option}));if(keep&&sources.some(s=>s.source_id===old))el('sources').value=old;await detail()}
+async function detail(){const id=el('sources').value;if(!id){el('message').textContent='暂无数据源。请先添加资料目录或导入中立聊天 JSON。';el('files').innerHTML='';return}const d=await api('/api/source/'+encodeURIComponent(id));const c=counts(d.events);for(const k of Object.keys(c))el(k).textContent=c[k];const map=Object.fromEntries(d.events.map(e=>[e.object_id,e.kind]));el('files').innerHTML=d.files.map(f=>`<tr><td>${escapeHtml(f.relative_path)}</td><td>${f.size} B</td><td>${f.content_hash.slice(0,12)}…</td><td>${map[f.object_id]||'—'}</td></tr>`).join('');const run=d.status.latest_run;const index=`关键词 ${d.index.lexical_chunks} 片段 · 向量 ${d.index.vector_chunks} 片段`;el('pause').textContent=d.status.paused?'恢复数据源':'暂停数据源';el('sync').disabled=d.status.paused;el('index').disabled=d.status.paused;el('vector-index').disabled=d.status.paused;el('message').textContent=`${d.status.paused?'已暂停':'运行中'} · ${run?'最近状态 '+run.status:'尚未同步'} · 文件 ${d.files.length} 个 · ${index} · 原文件不会被修改`}
 function escapeHtml(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
 el('register').addEventListener('submit',async e=>{e.preventDefault();try{const root=new FormData(e.target).get('root');await api('/api/register',{method:'POST',body:JSON.stringify({root})});await load(false)}catch(x){el('message').textContent=x.message;el('message').className='error'}});
 el('chat-import').addEventListener('submit',async e=>{e.preventDefault();const status=el('chat-status');try{status.className='muted';status.textContent='正在只读校验、切片并原子导入…';const form=new FormData(e.target);const out=await api('/api/chat-import',{method:'POST',body:JSON.stringify({path:form.get('path'),authorized:form.get('authorized')==='on'})});status.textContent=`导入成功：${out.documents} 个会话片段 · 新增 ${out.created} · 更新 ${out.updated} · 未变化 ${out.unchanged}`;await load(false);el('sources').value=out.source_id;await detail()}catch(x){status.textContent='导入失败：'+x.message;status.className='error'}});
 el('sync').addEventListener('click',async()=>{try{el('message').textContent='正在安全扫描并同步…';const id=el('sources').value;await api('/api/sync',{method:'POST',body:JSON.stringify({source_id:id})});await detail()}catch(x){el('message').textContent='同步已回滚：'+x.message;el('message').className='error'}});el('refresh').onclick=()=>load();el('sources').onchange=detail;load();
+el('pause').addEventListener('click',async()=>{try{const id=el('sources').value;const source=sources.find(s=>s.source_id===id);await api('/api/source-pause',{method:'POST',body:JSON.stringify({source_id:id,paused:!source.paused})});await load()}catch(x){el('message').textContent=x.message;el('message').className='error'}});
+el('delete-derived').addEventListener('click',async()=>{const id=el('sources').value;const suffix=id.slice(-8);const answer=window.prompt(`这只会删除应用生成的文档和索引，不会删除原文件。请输入 ${suffix} 确认：`);if(answer!==suffix)return;try{const out=await api('/api/delete-derived',{method:'POST',body:JSON.stringify({source_id:id,confirmation:suffix})});await detail();el('message').textContent=`已删除派生数据：${out.documents} 个文档、${out.lexical_chunks} 个关键词片段、${out.vector_chunks} 个向量片段。原文件未修改。`}catch(x){el('message').textContent=x.message;el('message').className='error'}});
 el('index').addEventListener('click',async()=>{try{const id=el('sources').value;const out=await api('/api/index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`索引完成：${out.documents} 个文档，${out.chunks} 个片段`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
 el('vector-index').addEventListener('click',async()=>{try{const id=el('sources').value;el('search-status').textContent='正在离线加载 BGE 并建立向量索引…';const out=await api('/api/vector-index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`BGE 向量索引完成：${out.chunks} 个片段，${out.dimension} 维`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
 el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const mode=String(form.get('mode'));const out=await api((mode==='hybrid'?'/api/hybrid-search?':'/api/search?')+params);el('search-status').textContent=`找到 ${out.results.length} 条结果${out.elapsed_ms===undefined?'':' · '+out.elapsed_ms+' ms'}`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');const source=document.createElement('td');source.textContent=r.title+' · '+r.file_type+' ';const reveal=document.createElement('button');reveal.textContent='在文件夹中显示';reveal.addEventListener('click',()=>api('/api/reveal',{method:'POST',body:JSON.stringify({source_id:r.source_id,document_id:r.document_id})}));source.append(reveal);for(const value of [r.snippet,r.rerank_score??r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}tr.prepend(source);return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
@@ -129,10 +134,24 @@ class Handler(BaseHTTPRequestHandler):
             with SQLiteStore(self.server.db_path) as store:
                 if path == "/api/sources":
                     self._json(store.status())
+                elif path == "/api/runtime":
+                    self._json(
+                        {
+                            "network": "仅监听 127.0.0.1，无云端回退",
+                            "embedding": "BGE-small-zh-v1.5（本地）",
+                            "chat_model": "Qwen3 4B（Ollama 本地）",
+                        }
+                    )
                 elif path.startswith("/api/source/"):
                     source_id = path.removeprefix("/api/source/")
                     status = store.status(source_id)[0]
-                    self._json({"status": status, "files": store.file_status(source_id), "events": store.latest_events(source_id)})
+                    lexical = store.connection.execute(
+                        "SELECT COUNT(*) FROM lexical_chunks WHERE source_id=?", (source_id,)
+                    ).fetchone()[0]
+                    vectors = store.connection.execute(
+                        "SELECT COUNT(*) FROM vector_chunks WHERE source_id=?", (source_id,)
+                    ).fetchone()[0]
+                    self._json({"status": status, "files": store.file_status(source_id), "events": store.latest_events(source_id), "index": {"lexical_chunks": lexical, "vector_chunks": vectors}})
                 elif path == "/api/search":
                     query = parse_qs(urlparse(self.path).query)
                     result = LexicalSearchService(store).search(
@@ -174,6 +193,16 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 elif self.path == "/api/sync":
                     self._json(service.sync(str(body["source_id"])))
+                elif self.path == "/api/source-pause":
+                    source = store.set_source_paused(
+                        str(body["source_id"]), body.get("paused") is True
+                    )
+                    self._json({"source_id": source.source_id, "paused": source.paused})
+                elif self.path == "/api/delete-derived":
+                    source_id = str(body["source_id"])
+                    if body.get("confirmation") != source_id[-8:]:
+                        raise PermissionError("Derived-data deletion confirmation did not match")
+                    self._json(store.delete_derived_data(source_id))
                 elif self.path == "/api/index":
                     self._json(LexicalSearchService(store).rebuild(str(body["source_id"])))
                 elif self.path == "/api/vector-index":

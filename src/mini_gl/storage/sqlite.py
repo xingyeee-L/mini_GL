@@ -27,6 +27,7 @@ class RegisteredSource:
     max_file_size: int
     max_depth: int
     allowed_extensions: frozenset[str]
+    paused: bool = False
     last_successful_run_id: str | None = None
     last_successful_at: str | None = None
 
@@ -54,7 +55,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 4:
+        if version > 5:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -188,6 +189,19 @@ class SQLiteStore:
                 """
             )
             self.connection.commit()
+            version = 4
+        if version == 4:
+            columns = {
+                str(row["name"])
+                for row in self.connection.execute("PRAGMA table_info(sources)").fetchall()
+            }
+            if "paused" not in columns:
+                self.connection.execute(
+                    "ALTER TABLE sources ADD COLUMN paused INTEGER NOT NULL DEFAULT 0 "
+                    "CHECK(paused IN (0,1))"
+                )
+            self.connection.execute("PRAGMA user_version = 5")
+            self.connection.commit()
 
     def recover_interrupted_runs(self) -> int:
         with self.connection:
@@ -222,7 +236,9 @@ class SQLiteStore:
             source_id = str(uuid.uuid4())
             with self.connection:
                 self.connection.execute(
-                    "INSERT INTO sources VALUES(?,?,?,?,?,?,NULL,NULL)",
+                    "INSERT INTO sources(source_id,root_path,allowed_extensions,max_file_size,"
+                    "max_depth,created_at,last_successful_run_id,last_successful_at) "
+                    "VALUES(?,?,?,?,?,?,NULL,NULL)",
                     (
                         source_id,
                         root_text,
@@ -248,6 +264,7 @@ class SQLiteStore:
             max_file_size=row["max_file_size"],
             max_depth=row["max_depth"],
             allowed_extensions=frozenset(json.loads(row["allowed_extensions"])),
+            paused=bool(row["paused"]),
             last_successful_run_id=row["last_successful_run_id"],
             last_successful_at=row["last_successful_at"],
         )
@@ -259,6 +276,8 @@ class SQLiteStore:
         return [self.get_source(row["source_id"]) for row in ids]
 
     def start_run(self, source_id: str) -> str:
+        if self.get_source(source_id).paused:
+            raise RuntimeError("Data source is paused")
         run_id = str(uuid.uuid4())
         with self.connection:
             self.connection.execute(
@@ -266,6 +285,39 @@ class SQLiteStore:
                 (run_id, source_id, utc_now()),
             )
         return run_id
+
+    def set_source_paused(self, source_id: str, paused: bool) -> RegisteredSource:
+        self.get_source(source_id)
+        with self.connection:
+            self.connection.execute(
+                "UPDATE sources SET paused=? WHERE source_id=?", (int(paused), source_id)
+            )
+        return self.get_source(source_id)
+
+    def delete_derived_data(self, source_id: str) -> dict[str, int]:
+        """Delete rebuildable application records while preserving the registered source."""
+        self.get_source(source_id)
+        counts = {
+            "documents": self.connection.execute(
+                "SELECT COUNT(*) FROM documents WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+            "lexical_chunks": self.connection.execute(
+                "SELECT COUNT(*) FROM lexical_chunks WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+            "vector_chunks": self.connection.execute(
+                "SELECT COUNT(*) FROM vector_chunks WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+        }
+        with self.connection:
+            self.connection.execute("DELETE FROM documents WHERE source_id=?", (source_id,))
+            self.connection.execute("DELETE FROM file_state WHERE source_id=?", (source_id,))
+            self.connection.execute("DELETE FROM sync_runs WHERE source_id=?", (source_id,))
+            self.connection.execute(
+                "UPDATE sources SET last_successful_run_id=NULL,last_successful_at=NULL "
+                "WHERE source_id=?",
+                (source_id,),
+            )
+        return counts
 
     def fail_run(self, run_id: str, error: Exception) -> None:
         message = str(error).replace("\n", " ")[:500]

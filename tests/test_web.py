@@ -63,12 +63,19 @@ class WebAcceptanceTests(unittest.TestCase):
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             page = response.read().decode()
         self.assertIn("本地数据与搜索验收台", page)
+        self.assertIn("运行与隐私状态", page)
+        self.assertIn("真实 QQ/微信数据尚未开放", page)
         self.assertIn("构建 BGE 本地向量索引", page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)
         self.assertIn("created", encoded)
         self.assertNotIn("secret body", encoded)
+        self.assertEqual(result["index"], {"lexical_chunks": 0, "vector_chunks": 0})
+
+        runtime = self._get_json("/api/runtime")
+        self.assertIn("127.0.0.1", str(runtime["network"]))
+        self.assertIn("Qwen3", str(runtime["chat_model"]))
 
     def test_api_rejects_request_without_csrf_token(self) -> None:
         with self.assertRaises(HTTPError) as caught:
@@ -145,6 +152,25 @@ class WebAcceptanceTests(unittest.TestCase):
                 "SELECT document_id FROM documents WHERE source_id=?", (source_id,)
             ).fetchone()[0]
             self.assertEqual(resolve_document_path(store, source_id, document_id), chat)
+
+    def test_visual_source_pause_and_confirmed_derived_delete(self) -> None:
+        paused = self._post_json(
+            "/api/source-pause", {"source_id": self.source_id, "paused": True}
+        )
+        self.assertTrue(paused["paused"])
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json(
+                "/api/delete-derived",
+                {"source_id": self.source_id, "confirmation": "wrong"},
+            )
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        deleted = self._post_json(
+            "/api/delete-derived",
+            {"source_id": self.source_id, "confirmation": self.source_id[-8:]},
+        )
+        self.assertEqual(deleted["documents"], 1)
+        self.assertTrue((self.root / "visible-name.txt").exists())
 
 
 class FakeChatModel:

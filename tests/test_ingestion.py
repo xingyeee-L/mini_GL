@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -135,6 +136,33 @@ class IngestionTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM change_events WHERE run_id=?", (run_id,)
             ).fetchone()[0],
             1,
+        )
+
+    def test_pause_and_delete_derived_data_preserve_source_files(self) -> None:
+        note = self.root / "keep.txt"
+        note.write_text("keep me", encoding="utf-8")
+        source = self.service.register(self.root)
+        self.service.sync(source.source_id)
+        self.store.set_source_paused(source.source_id, True)
+        with self.assertRaisesRegex(RuntimeError, "paused"):
+            self.service.sync(source.source_id)
+        self.store.set_source_paused(source.source_id, False)
+        removed = self.store.delete_derived_data(source.source_id)
+        self.assertEqual(removed["documents"], 1)
+        self.assertTrue(note.exists())
+        self.assertEqual(note.read_text(encoding="utf-8"), "keep me")
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 0)
+
+    def test_partial_pause_migration_recovers_idempotently(self) -> None:
+        self.store.close()
+        connection = sqlite3.connect(self.db)
+        connection.execute("PRAGMA user_version = 4")
+        connection.commit()
+        connection.close()
+        self.store = SQLiteStore(self.db)
+        self.service = IngestionService(self.store)
+        self.assertEqual(
+            self.store.connection.execute("PRAGMA user_version").fetchone()[0], 5
         )
 
     @staticmethod
