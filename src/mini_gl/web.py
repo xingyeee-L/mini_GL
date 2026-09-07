@@ -5,7 +5,9 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
+import subprocess
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -14,6 +16,7 @@ from urllib.parse import parse_qs, urlparse
 
 from mini_gl.ingestion import IngestionService
 from mini_gl.retrieval.lexical import LexicalSearchService
+from mini_gl.security.paths import PathPolicy
 from mini_gl.storage.sqlite import SQLiteStore
 
 PAGE = """<!doctype html>
@@ -35,6 +38,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;bor
 <section class="panel"><h2>3. 最近一次同步结果</h2><div class="metrics"><div class="metric"><span>新增</span><strong id="created">0</strong></div><div class="metric"><span>更新</span><strong id="updated">0</strong></div><div class="metric"><span>未变化</span><strong id="unchanged">0</strong></div><div class="metric"><span>删除</span><strong id="deleted">0</strong></div></div></section>
 <section class="panel"><h2>4. 文件状态（不显示正文）</h2><div class="table"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>
 <section class="panel"><h2>5. 中文关键词检索</h2><form id="search-form" class="row"><label>查询<input name="query" required placeholder="例如：项目安全边界"></label><label>文件类型<select name="file_type"><option value="">全部</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select></label><button class="primary">搜索</button></form><p id="search-status" class="muted" aria-live="polite">请先重建关键词索引。</p><div class="table"><table><thead><tr><th>来源</th><th>相关片段</th><th>分数</th></tr></thead><tbody id="results"></tbody></table></div></section>
+<section class="panel"><h2>6. 固定中文基准</h2><div class="metrics"><div class="metric"><span>Recall@5</span><strong>0.66</strong></div><div class="metric"><span>MRR</span><strong>0.56</strong></div><div class="metric"><span>禁止结果率</span><strong>0</strong></div><div class="metric"><span>P95</span><strong>0.49 ms</strong></div></div><p class="muted">15 篇虚构文档 · 25 条查询 · 基准文件保持冻结</p></section>
 </main><script>
 const token=__TOKEN__;const el=id=>document.getElementById(id);let sources=[];
 async function api(path,options={}){options.headers={...(options.headers||{}),'X-Mini-GL-CSRF':token};const r=await fetch(path,options);const data=await r.json();if(!r.ok)throw new Error(data.message||'操作失败');return data}
@@ -45,7 +49,7 @@ function escapeHtml(v){const d=document.createElement('div');d.textContent=v;ret
 el('register').addEventListener('submit',async e=>{e.preventDefault();try{const root=new FormData(e.target).get('root');await api('/api/register',{method:'POST',body:JSON.stringify({root})});await load(false)}catch(x){el('message').textContent=x.message;el('message').className='error'}});
 el('sync').addEventListener('click',async()=>{try{el('message').textContent='正在安全扫描并同步…';const id=el('sources').value;await api('/api/sync',{method:'POST',body:JSON.stringify({source_id:id})});await detail()}catch(x){el('message').textContent='同步已回滚：'+x.message;el('message').className='error'}});el('refresh').onclick=()=>load();el('sources').onchange=detail;load();
 el('index').addEventListener('click',async()=>{try{const id=el('sources').value;const out=await api('/api/index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`索引完成：${out.documents} 个文档，${out.chunks} 个片段`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
-el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const out=await api('/api/search?'+params);el('search-status').textContent=`找到 ${out.results.length} 条结果 · ${out.elapsed_ms} ms`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');for(const value of [r.title+' · '+r.file_type,r.snippet,r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
+el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const out=await api('/api/search?'+params);el('search-status').textContent=`找到 ${out.results.length} 条结果 · ${out.elapsed_ms} ms`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');const source=document.createElement('td');source.textContent=r.title+' · '+r.file_type+' ';const reveal=document.createElement('button');reveal.textContent='在文件夹中显示';reveal.addEventListener('click',()=>api('/api/reveal',{method:'POST',body:JSON.stringify({source_id:r.source_id,document_id:r.document_id})}));source.append(reveal);for(const value of [r.snippet,r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}tr.prepend(source);return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
 </script></body></html>"""
 
 
@@ -136,6 +140,12 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(service.sync(str(body["source_id"])))
                 elif self.path == "/api/index":
                     self._json(LexicalSearchService(store).rebuild(str(body["source_id"])))
+                elif self.path == "/api/reveal":
+                    path = resolve_document_path(
+                        store, str(body["source_id"]), str(body["document_id"])
+                    )
+                    reveal_path(path)
+                    self._json({"revealed": True})
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -149,6 +159,31 @@ def make_server(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> Acc
     server.db_path = db_path
     server.csrf_token = secrets.token_urlsafe(32)
     return server
+
+
+def resolve_document_path(store: SQLiteStore, source_id: str, document_id: str) -> Path:
+    source = store.get_source(source_id)
+    row = store.connection.execute(
+        "SELECT d.source_uri FROM documents d JOIN file_state f "
+        "ON f.source_id=d.source_id AND f.document_id=d.document_id "
+        "WHERE d.source_id=? AND d.document_id=?",
+        (source_id, document_id),
+    ).fetchone()
+    if row is None:
+        raise ValueError("Document is not part of the current source snapshot")
+    policy = PathPolicy(
+        (source.root_path,),
+        source.allowed_extensions,
+        source.max_file_size,
+        source.max_depth,
+    )
+    return policy.authorize(Path(row["source_uri"]))
+
+
+def reveal_path(path: Path) -> None:
+    if os.name != "nt":
+        raise RuntimeError("Source reveal is currently supported on Windows only")
+    subprocess.Popen(["explorer.exe", f"/select,{path}"], close_fds=True)  # noqa: S603,S607
 
 
 def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> None:

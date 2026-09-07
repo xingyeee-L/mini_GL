@@ -10,7 +10,7 @@ from urllib.request import Request, urlopen
 
 from mini_gl.ingestion import IngestionService
 from mini_gl.storage.sqlite import SQLiteStore
-from mini_gl.web import make_server
+from mini_gl.web import make_server, resolve_document_path
 
 
 class WebAcceptanceTests(unittest.TestCase):
@@ -64,3 +64,13 @@ class WebAcceptanceTests(unittest.TestCase):
     def test_server_rejects_non_loopback_binding(self) -> None:
         with self.assertRaisesRegex(ValueError, "loopback"):
             make_server(self.db, "0.0.0.0", 0)  # noqa: S104 - rejection test
+
+    def test_reveal_path_must_belong_to_current_snapshot(self) -> None:
+        with SQLiteStore(self.db) as store:
+            document_id = store.connection.execute(
+                "SELECT document_id FROM documents WHERE source_id=?", (self.source_id,)
+            ).fetchone()[0]
+            resolved = resolve_document_path(store, self.source_id, document_id)
+            self.assertEqual(resolved.name, "visible-name.txt")
+            with self.assertRaisesRegex(ValueError, "current source snapshot"):
+                resolve_document_path(store, self.source_id, "unknown-document")
