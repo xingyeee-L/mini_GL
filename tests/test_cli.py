@@ -37,6 +37,18 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(searched)["results"][0]["title"], "hello.txt")
 
+            backup = base / "backup.sqlite3"
+            code, backed_up = self._invoke("backup", str(backup), "--db", str(db))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(backed_up)["integrity"], "ok")
+            restored = base / "restored.sqlite3"
+            code, restored_output = self._invoke("restore", str(backup), str(restored))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(restored_output)["integrity"], "ok")
+            code, restored_status = self._invoke("status", source_id, "--db", str(restored))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(restored_status)[0]["file_count"], 1)
+
     def test_rejects_limits_above_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "source"

@@ -9,6 +9,18 @@ from urllib.parse import urlparse
 from mini_gl.generation.models import ChatResponse
 
 
+class LocalModelError(RuntimeError):
+    """Base error with a privacy-safe message for local inference failures."""
+
+
+class LocalModelTimeoutError(LocalModelError):
+    """Raised when the local inference service exceeds its configured deadline."""
+
+
+class LocalModelUnavailableError(LocalModelError):
+    """Raised when the configured loopback inference service cannot be reached."""
+
+
 class LocalOpenAIChatModel:
     def __init__(self, endpoint: str, model: str, *, timeout_seconds: float = 120.0) -> None:
         parsed = urlparse(endpoint)
@@ -48,13 +60,24 @@ class LocalOpenAIChatModel:
             )
             response = connection.getresponse()
             raw = response.read(1_048_577)
+        except TimeoutError as exc:
+            raise LocalModelTimeoutError(
+                "Local model timed out; verify the model is loaded and retry"
+            ) from exc
+        except OSError as exc:
+            raise LocalModelUnavailableError(
+                "Local model is unavailable; start the configured loopback service and retry"
+            ) from exc
         finally:
             connection.close()
         if len(raw) > 1_048_576:
             raise RuntimeError("Local model response exceeded the safety limit")
         if response.status != 200:
             raise RuntimeError(f"Local model returned HTTP {response.status}")
-        value = json.loads(raw)
+        try:
+            value = json.loads(raw)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise LocalModelError("Local model returned an invalid JSON response") from exc
         try:
             answer = value["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:

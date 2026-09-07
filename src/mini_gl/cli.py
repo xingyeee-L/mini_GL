@@ -96,6 +96,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat_convert.add_argument("format", choices=("qq", "wechat"))
     chat_convert.add_argument("source", type=Path)
     chat_convert.add_argument("destination", type=Path)
+    backup = subparsers.add_parser("backup", help="Create a verified SQLite snapshot")
+    backup.add_argument("destination", type=Path)
+    restore = subparsers.add_parser("restore", help="Restore a snapshot to a new database path")
+    restore.add_argument("backup", type=Path)
+    restore.add_argument("destination", type=Path)
     commands = (
         register,
         sync,
@@ -109,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
         serve,
         chat_import,
         chat_convert,
+        backup,
     )
     for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -134,6 +140,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                     ensure_ascii=False,
                 )
             )
+            return 0
+        if args.command in {"backup", "restore"}:
+            from mini_gl.maintenance import backup_database, restore_database
+
+            result = (
+                backup_database(args.db, args.destination)
+                if args.command == "backup"
+                else restore_database(args.backup, args.destination)
+            )
+            print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
         with SQLiteStore(args.db) as store:
             service = IngestionService(store)

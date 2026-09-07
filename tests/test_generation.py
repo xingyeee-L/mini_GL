@@ -3,9 +3,14 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from mini_gl.generation.context import ContextBuilder
-from mini_gl.generation.local_http import LocalOpenAIChatModel
+from mini_gl.generation.local_http import (
+    LocalModelTimeoutError,
+    LocalModelUnavailableError,
+    LocalOpenAIChatModel,
+)
 from mini_gl.generation.models import ChatResponse
 from mini_gl.generation.service import RAGService
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
@@ -96,6 +101,29 @@ class GenerationTests(unittest.TestCase):
         ):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 LocalOpenAIChatModel(endpoint, "local-model")
+
+    def test_local_model_reports_timeout_without_leaking_request_content(self) -> None:
+        model = LocalOpenAIChatModel(
+            "http://127.0.0.1:11434/v1/chat/completions",
+            "local-model",
+            timeout_seconds=0.01,
+        )
+        with patch("mini_gl.generation.local_http.http.client.HTTPConnection") as factory:
+            factory.return_value.request.side_effect = TimeoutError("private prompt")
+            with self.assertRaises(LocalModelTimeoutError) as caught:
+                model.generate(system_prompt="system secret", user_prompt="user secret")
+        self.assertNotIn("secret", str(caught.exception))
+        factory.return_value.close.assert_called_once()
+
+    def test_local_model_reports_unavailable_with_recovery_hint(self) -> None:
+        model = LocalOpenAIChatModel(
+            "http://127.0.0.1:11434/v1/chat/completions", "local-model"
+        )
+        with patch("mini_gl.generation.local_http.http.client.HTTPConnection") as factory:
+            factory.return_value.request.side_effect = ConnectionRefusedError("private endpoint")
+            with self.assertRaises(LocalModelUnavailableError) as caught:
+                model.generate(system_prompt="system", user_prompt="user")
+        self.assertIn("start", str(caught.exception))
 
     def test_filters_apply_before_generation(self) -> None:
         result = self.rag.answer("限制读取范围", self.source_id, file_type=".txt")
