@@ -85,6 +85,12 @@ def build_parser() -> argparse.ArgumentParser:
         "chat-import", help="Import a provider-neutral versioned chat JSON export"
     )
     chat_import.add_argument("path", type=Path)
+    chat_convert = subparsers.add_parser(
+        "chat-convert", help="Convert a synthetic QQ/WeChat export to neutral JSON"
+    )
+    chat_convert.add_argument("format", choices=("qq", "wechat"))
+    chat_convert.add_argument("source", type=Path)
+    chat_convert.add_argument("destination", type=Path)
     commands = (
         register,
         sync,
@@ -97,6 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
         ask,
         serve,
         chat_import,
+        chat_convert,
     )
     for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -112,6 +119,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             from mini_gl.web import serve
 
             serve(args.db, args.host, args.port)
+            return 0
+        if args.command == "chat-convert":
+            from mini_gl.adapters import convert_export
+
+            print(
+                json.dumps(
+                    convert_export(args.format, args.source, args.destination),
+                    ensure_ascii=False,
+                )
+            )
             return 0
         with SQLiteStore(args.db) as store:
             service = IngestionService(store)

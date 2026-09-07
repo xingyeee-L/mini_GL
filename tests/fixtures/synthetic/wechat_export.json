@@ -1,0 +1,1 @@
+{"session":{"talker_id":"wx-group-7","display_name":"虚构微信测试群","member_ids":["wx-a","wx-b"]},"messages":[{"local_id":"wx-1","from_id":"wx-a","from_name":"测试甲","timestamp":"2026-02-02T14:00:00+08:00","kind":"text","body":"虚构发布窗口定在星期三。"},{"local_id":"wx-2","from_id":"wx-b","from_name":"测试乙","timestamp":"2026-02-02T14:08:00+08:00","kind":"text","body":"这条撤回内容不应保存","revoked":true}]}

@@ -7,6 +7,11 @@ WeChat databases, decrypt client storage, inject into client processes, automate
 network service. Provider-specific converters must run as separate, replaceable preprocessing
 tools and produce this neutral contract before core import.
 
+The current `qq` and `wechat` adapters intentionally recognize only the repository's documented
+synthetic export shapes. They demonstrate the isolation boundary; they are not claims of
+compatibility with proprietary client databases or every official export version. Conversion is
+explicit, offline, and refuses to overwrite an existing neutral JSON output.
+
 ## Version 1.0 contract
 
 Required root fields are `schema_version`, `platform`, `conversation`, and `messages`.

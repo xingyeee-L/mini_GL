@@ -112,6 +112,38 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertEqual(result["citations"][0]["title"], "visible-name.txt")
         self.assertEqual(result["prompt_tokens"], 12)
 
+    def test_visual_neutral_chat_import_flow(self) -> None:
+        chat = self.base / "neutral-chat.json"
+        chat.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "platform": "synthetic-chat",
+                    "conversation": {
+                        "id": "chat-1", "title": "虚构聊天", "participants": ["a"]
+                    },
+                    "messages": [
+                        {
+                            "id": "m1", "sender_id": "a",
+                            "sent_at": "2026-01-01T09:00:00+08:00",
+                            "message_type": "text", "text": "测试消息",
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        result = self._post_json("/api/chat-import", {"path": str(chat)})
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["documents"], 1)
+        source_id = str(result["source_id"])
+        with SQLiteStore(self.db) as store:
+            document_id = store.connection.execute(
+                "SELECT document_id FROM documents WHERE source_id=?", (source_id,)
+            ).fetchone()[0]
+            self.assertEqual(resolve_document_path(store, source_id, document_id), chat)
+
 
 class FakeChatModel:
     name = "fake-local-model"
