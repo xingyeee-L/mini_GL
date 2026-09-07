@@ -49,7 +49,7 @@ class WebAcceptanceTests(unittest.TestCase):
         with urlopen(request, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             return json.load(response)  # type: ignore[no-any-return]
 
-    def _post_json(self, path: str, body: dict[str, str]) -> dict[str, object]:
+    def _post_json(self, path: str, body: dict[str, object]) -> dict[str, object]:
         request = Request(  # noqa: S310 - fixed loopback URL
             self.base_url + path,
             data=json.dumps(body).encode(),
@@ -134,7 +134,9 @@ class WebAcceptanceTests(unittest.TestCase):
             ),
             encoding="utf-8",
         )
-        result = self._post_json("/api/chat-import", {"path": str(chat)})
+        result = self._post_json(
+            "/api/chat-import", {"path": str(chat), "authorized": True}
+        )
         self.assertEqual(result["created"], 1)
         self.assertEqual(result["documents"], 1)
         source_id = str(result["source_id"])

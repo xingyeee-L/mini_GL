@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from mini_gl.parsers.chat_json import MAX_CHAT_EXPORT_SIZE
+from mini_gl.parsers.chat_json import MAX_CHAT_EXPORT_SIZE, read_stable_json
 from mini_gl.security.paths import PathPolicy
 
 
@@ -16,17 +16,21 @@ def convert_export(kind: str, source: Path, destination: Path) -> dict[str, obje
     canonical = PathPolicy(
         (source.parent,), frozenset({".json"}), MAX_CHAT_EXPORT_SIZE, 0
     ).authorize(source)
-    try:
-        raw = json.loads(canonical.read_text(encoding="utf-8-sig"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("Adapter input must be valid UTF-8 JSON") from exc
+    raw = read_stable_json(canonical)
     if not isinstance(raw, dict):
         raise ValueError("Adapter input root must be an object")
     neutral = _convert_qq(raw) if kind == "qq" else _convert_wechat(raw)
+    output_parent = PathPolicy(
+        (destination.parent,), frozenset({".json"}), MAX_CHAT_EXPORT_SIZE, 0
+    ).authorize_root(destination.parent)
+    destination = output_parent / destination.name
+    if destination.suffix.lower() != ".json":
+        raise ValueError("Destination must use the .json extension")
     if destination.exists() or destination.is_symlink():
         raise FileExistsError("Destination already exists; refusing to overwrite it")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(neutral, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(neutral, ensure_ascii=False, indent=2)
+    with destination.open("x", encoding="utf-8", newline="\n") as stream:
+        stream.write(payload)
     return {"destination": str(destination.resolve()), "messages": len(neutral["messages"])}
 
 

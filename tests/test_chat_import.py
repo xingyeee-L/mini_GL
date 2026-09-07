@@ -49,8 +49,8 @@ class ChatImportTests(unittest.TestCase):
         self.assertIsNone(parsed.messages[-1].text)
         with SQLiteStore(self.db) as store:
             service = ChatImportService(store)
-            first = service.import_file(self.path)
-            second = service.import_file(self.path)
+            first = service.import_file(self.path, authorized=True)
+            second = service.import_file(self.path, authorized=True)
             self.assertEqual(first["documents"], 2)
             self.assertEqual(first["created"], 2)
             self.assertEqual(second["unchanged"], 2)
@@ -63,6 +63,10 @@ class ChatImportTests(unittest.TestCase):
             metadata = json.loads(rows[0]["metadata_json"])
             self.assertEqual(metadata["conversation_id"], "group-1")
             self.assertEqual(metadata["participants"], ["a", "b"])
+
+    def test_import_requires_explicit_authorization_confirmation(self) -> None:
+        with SQLiteStore(self.db) as store, self.assertRaises(PermissionError):
+            ChatImportService(store).import_file(self.path)
 
     def test_rejects_timezone_free_duplicate_and_external_reply(self) -> None:
         for mutation in ("timezone", "duplicate", "reply"):

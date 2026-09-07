@@ -25,18 +25,27 @@ class ChatExport:
 
 
 def parse_chat_export(path: Path) -> ChatExport:
+    value = read_stable_json(path)
+    return _validate(value, path)
+
+
+def read_stable_json(path: Path) -> Any:
     before = path.stat()
     if before.st_size > MAX_CHAT_EXPORT_SIZE:
         raise TextParseError("Chat export exceeds the 10 MiB safety limit")
-    raw = path.read_bytes()
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise TextParseError("Unable to read chat export") from exc
     after = path.stat()
-    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+    identity_before = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns)
+    identity_after = (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns)
+    if identity_before != identity_after or len(raw) != before.st_size:
         raise TextParseError("Chat export changed while it was being read")
     try:
-        value = json.loads(raw.decode("utf-8-sig"))
+        return json.loads(raw.decode("utf-8-sig"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise TextParseError("Chat export must be valid UTF-8 JSON") from exc
-    return _validate(value, path)
 
 
 def _validate(value: Any, path: Path) -> ChatExport:

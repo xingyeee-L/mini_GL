@@ -38,3 +38,6 @@ not retained. Attachment values remain inert references and are never opened aut
 - Same-name contacts remain distinct through sender IDs.
 - Imported windows can use the existing lexical, vector, hybrid, and grounded-answer pipeline.
 - A separate privacy review is required before importing any real export.
+
+The synthetic-stage review is recorded in `phase5-privacy-path-review.md`. It approves the current
+test boundary but deliberately keeps real-data ingestion gated on an exporter-specific review.

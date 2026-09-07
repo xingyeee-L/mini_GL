@@ -20,7 +20,9 @@ class ChatImportService:
     def __init__(self, store: SQLiteStore) -> None:
         self.store = store
 
-    def import_file(self, path: Path) -> dict[str, object]:
+    def import_file(self, path: Path, *, authorized: bool = False) -> dict[str, object]:
+        if not authorized:
+            raise PermissionError("Confirm that you are authorized to use this chat export")
         canonical = PathPolicy(
             (path.parent,), frozenset({".json"}), MAX_CHAT_EXPORT_SIZE, 0
         ).authorize(path)

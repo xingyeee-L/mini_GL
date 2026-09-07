@@ -85,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         "chat-import", help="Import a provider-neutral versioned chat JSON export"
     )
     chat_import.add_argument("path", type=Path)
+    chat_import.add_argument(
+        "--confirm-authorized",
+        action="store_true",
+        help="Confirm that you are authorized to use this export",
+    )
     chat_convert = subparsers.add_parser(
         "chat-convert", help="Convert a synthetic QQ/WeChat export to neutral JSON"
     )
@@ -137,7 +142,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
                 print(
                     json.dumps(
-                        ChatImportService(store).import_file(args.path),
+                        ChatImportService(store).import_file(
+                            args.path, authorized=args.confirm_authorized
+                        ),
                         ensure_ascii=False,
                         sort_keys=True,
                     )
