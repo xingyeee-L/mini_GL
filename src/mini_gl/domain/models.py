@@ -75,3 +75,5 @@ class GroundedAnswer:
     model: str | None
     retrieval_ms: float
     generation_ms: float
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None

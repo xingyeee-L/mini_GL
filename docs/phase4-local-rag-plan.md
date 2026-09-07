@@ -27,17 +27,38 @@ Implemented foundations:
   the system policy forbids tools, networking, instruction following, and unsupported claims.
 - The CLI `ask` command exposes the complete service path for a local OpenAI-compatible runtime.
 
-## Remaining work
+## Completed local runtime
 
-1. Select and install one local instruct model that fits the reference 6 GB GPU and CPU fallback.
-2. Replace the character approximation with the selected model tokenizer and a measured token
-   budget.
-3. Add deterministic query rewriting and explicit source/type/time filters to `ask`.
-4. Validate citation markers against the supplied citation set and evaluate claim support.
-5. Add an answer benchmark covering correct answers, abstention, conflicting evidence, citation
-   completeness, and prompt injection.
-6. Record retrieval, time-to-first-token, total generation latency, memory, and failure behavior.
-7. Add the grounded-answer flow to the local visual console after the CLI path is stable.
+- Runtime: Ollama 0.33.3 on Windows, serving only through its local API.
+- Model: `qwen3:4b-instruct-2507-q4_K_M`, 2.5 GB download and about 3.2 GB loaded size.
+- Hardware observation: 100% GPU placement on the RTX 3060 Laptop GPU; total system GPU memory in
+  use was approximately 4.87 GiB of 6 GiB during measurement.
+- Budgeting: conservative tokenizer-independent token estimation bounds context before generation;
+  exact prompt and completion counts are captured from the OpenAI-compatible response.
+- Filters: source, file type, and update time apply to lexical and vector retrieval before context
+  selection or generation. Queries are NFKC-normalized, control characters removed, whitespace
+  collapsed, and length limited.
+- Validation: every factual sentence must use an in-range source marker and pass lexical or semantic
+  support against the cited chunk. A failed check becomes an explicit insufficient-evidence answer.
+
+## Real-model benchmark
+
+Eight synthetic cases cover path security, read-only behavior, crash recovery, offline behavior,
+derived deletion, citation fields, prompt injection, and an unsupported weather question.
+
+- Passed: 8/8.
+- Warm end-to-end P50: approximately 319 ms.
+- Warm end-to-end P95: approximately 895 ms.
+- Observed prompt sizes: 171 to 468 tokens for generated cases.
+- Unsupported case: rejected before generation with zero generation time and no model call.
+- Prompt-injection case: returned a cited refusal and caused no tool or network action.
+
+## Deferred work
+
+1. Expand the answer benchmark beyond eight synthetic cases and add conflicting-source cases.
+2. Add streaming and time-to-first-token measurement if the user interface needs it.
+3. Add the grounded-answer flow to the visual console in phase six.
+4. Run larger-corpus, long-duration, CPU fallback, and fault-injection tests in phase seven.
 
 ## Acceptance criteria
 
@@ -50,9 +71,11 @@ Implemented foundations:
 
 ## Current assumptions and risks
 
-- The first runtime will expose an OpenAI-compatible loopback endpoint; Ollama and llama.cpp are
-  candidates, but neither is currently installed on the reference machine.
-- Character limits are a conservative temporary control, not a final token budget.
+- Ollama is installed as the selected local OpenAI-compatible runtime; llama.cpp remains a
+  replaceable alternative behind the same interface.
+- The preflight counter intentionally overestimates mixed Chinese/Latin tokens; exact usage is
+  recorded after generation but Ollama does not expose a tokenizer preflight through this adapter.
 - Model-generated citation syntax is not trusted; citation objects always come from the retrieval
   and storage layers.
-- A model can still produce unsupported prose, so claim-level evaluation remains a phase blocker.
+- Lexical/semantic support checks reduce unsupported prose but are not a formal entailment proof;
+  broader adversarial evaluation remains ongoing safety work.

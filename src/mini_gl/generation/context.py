@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 
 from mini_gl.domain.models import Citation
@@ -13,23 +14,45 @@ from mini_gl.storage.sqlite import SQLiteStore
 class ContextBundle:
     text: str
     citations: tuple[Citation, ...]
+    evidence: tuple[str, ...]
+    estimated_tokens: int
+
+
+class ConservativeTokenCounter:
+    """Overestimate mixed Chinese/Latin tokens without loading remote tokenizer code."""
+
+    _latin = re.compile(r"[A-Za-z0-9_]+|[^A-Za-z0-9_\s]")
+
+    def count(self, text: str) -> int:
+        cjk = sum("\u3400" <= char <= "\u9fff" for char in text)
+        without_cjk = "".join(" " if "\u3400" <= char <= "\u9fff" else char for char in text)
+        latin = sum(max(1, (len(token) + 3) // 4) for token in self._latin.findall(without_cjk))
+        return cjk + latin
 
 
 class ContextBuilder:
-    def __init__(self, store: SQLiteStore, *, max_chars: int = 6_000, max_chunks: int = 6) -> None:
-        if max_chars < 200 or not 1 <= max_chunks <= 20:
+    def __init__(
+        self,
+        store: SQLiteStore,
+        *,
+        max_tokens: int = 3_000,
+        max_chunks: int = 6,
+    ) -> None:
+        if max_tokens < 100 or not 1 <= max_chunks <= 20:
             raise ValueError("Invalid context budget")
         self.store = store
-        self.max_chars = max_chars
+        self.max_tokens = max_tokens
         self.max_chunks = max_chunks
+        self.counter = ConservativeTokenCounter()
 
     def build(self, source_id: str, ranked: list[dict[str, object]]) -> ContextBundle:
         sections: list[str] = []
         citations: list[Citation] = []
+        evidence: list[str] = []
         seen: set[str] = set()
-        remaining = self.max_chars
+        used_tokens = 0
         for result in ranked:
-            if len(sections) >= self.max_chunks or remaining <= 0:
+            if len(sections) >= self.max_chunks or used_tokens >= self.max_tokens:
                 break
             row = self.store.connection.execute(
                 "SELECT chunk_id,document_id,source_uri,title,content FROM lexical_chunks "
@@ -44,12 +67,16 @@ class ContextBuilder:
             seen.add(digest)
             label = len(citations) + 1
             header = f"[来源 {label}] {row['title']}\n"
-            available = remaining - len(header)
-            if available <= 0:
+            header_tokens = self.counter.count(header)
+            available_tokens = self.max_tokens - used_tokens - header_tokens
+            if available_tokens <= 0:
                 break
-            content = str(row["content"])[:available]
+            content = _fit_tokens(str(row["content"]), available_tokens, self.counter)
+            if not content:
+                break
             sections.append(header + content)
-            remaining -= len(header) + len(content)
+            evidence.append(content)
+            used_tokens += header_tokens + self.counter.count(content)
             citations.append(
                 Citation(
                     document_id=str(row["document_id"]),
@@ -60,4 +87,19 @@ class ContextBuilder:
                     end_offset=len(content),
                 )
             )
-        return ContextBundle("\n\n".join(sections), tuple(citations))
+        return ContextBundle(
+            "\n\n".join(sections), tuple(citations), tuple(evidence), used_tokens
+        )
+
+
+def _fit_tokens(text: str, budget: int, counter: ConservativeTokenCounter) -> str:
+    if counter.count(text) <= budget:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if counter.count(text[:middle]) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    return text[:low]

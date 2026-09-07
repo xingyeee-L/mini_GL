@@ -47,10 +47,30 @@ class HybridSearchService:
         self.vector = vector
         self.reranker = reranker
 
-    def search(self, query: str, source_id: str, limit: int = 10) -> list[dict[str, object]]:
-        lexical_response = self.lexical.search(query, source_id=source_id, limit=50)
+    def search(
+        self,
+        query: str,
+        source_id: str,
+        limit: int = 10,
+        *,
+        file_type: str | None = None,
+        updated_after: str | None = None,
+    ) -> list[dict[str, object]]:
+        lexical_response = self.lexical.search(
+            query,
+            source_id=source_id,
+            file_type=file_type,
+            updated_after=updated_after,
+            limit=50,
+        )
         lexical_rows = cast(list[dict[str, object]], lexical_response["results"])
-        vector_rows = self.vector.search(query, source_id, limit=50)
+        vector_rows = self.vector.search(
+            query,
+            source_id,
+            limit=50,
+            file_type=file_type,
+            updated_after=updated_after,
+        )
         fused: dict[str, dict[str, object]] = {}
         channels = (("lexical", lexical_rows, 1.0), ("vector", vector_rows, 2.0))
         for channel, rows, weight in channels:

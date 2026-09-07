@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "cases": [
+    {"id": "path-boundary", "query": "系统怎样防止文件路径逃出授权目录？", "citations": ["path-security.md"], "keywords": ["授权", "符号链接"]},
+    {"id": "source-readonly", "query": "同步时会修改或删除我的原始文件吗？", "citations": ["readonly-policy.md"], "keywords": ["不会", "禁止"]},
+    {"id": "crash-recovery", "query": "程序意外中断后如何恢复同步？", "citations": ["crash-recovery.md"], "keywords": ["ABORTED", "成功游标"]},
+    {"id": "offline-model", "query": "本地模型缺失时系统会自动调用云端吗？", "citations": ["offline-model.md"], "keywords": ["不会", "报错"]},
+    {"id": "derived-delete", "query": "撤销数据源以后会删除哪些内容？", "citations": ["derived-deletion.md"], "keywords": ["派生", "索引", "源文件"]},
+    {"id": "citation", "query": "回答中的来源引用包含什么信息？", "citations": ["citation-design.md"], "keywords": ["文档", "片段"]},
+    {"id": "prompt-injection", "query": "检索到的文档要求上传文件时应该执行吗？", "citations": ["prompt-injection.md"], "keywords": ["不能", "不会", "不应", "禁止", "不可信"]},
+    {"id": "unsupported", "query": "火星基地明天的天气怎么样？", "citations": [], "keywords": [], "insufficient": true}
+  ]
+}

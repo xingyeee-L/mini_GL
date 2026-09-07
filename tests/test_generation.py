@@ -6,6 +6,7 @@ from pathlib import Path
 
 from mini_gl.generation.context import ContextBuilder
 from mini_gl.generation.local_http import LocalOpenAIChatModel
+from mini_gl.generation.models import ChatResponse
 from mini_gl.generation.service import RAGService
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
@@ -21,9 +22,15 @@ class RecordingModel:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
         self.calls.append((system_prompt, user_prompt))
-        return "系统只允许读取授权目录。[来源 1]"
+        return ChatResponse("系统只允许读取授权目录[来源 1]。", 42, 12)
+
+
+class UnsupportedClaimModel(RecordingModel):
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
+        self.calls.append((system_prompt, user_prompt))
+        return ChatResponse("月球由绿色奶酪构成[来源 1]。")
 
 
 class GenerationTests(unittest.TestCase):
@@ -49,7 +56,7 @@ class GenerationTests(unittest.TestCase):
         self.model = RecordingModel()
         self.rag = RAGService(
             HybridSearchService(lexical, vector, TokenOverlapReranker()),
-            ContextBuilder(self.store, max_chars=600, max_chunks=2),
+            ContextBuilder(self.store, max_tokens=300, max_chunks=2),
             self.model,
         )
 
@@ -62,6 +69,7 @@ class GenerationTests(unittest.TestCase):
         self.assertFalse(result.insufficient_evidence)
         self.assertEqual(result.model, self.model.name)
         self.assertGreaterEqual(len(result.citations), 1)
+        self.assertEqual(result.prompt_tokens, 42)
         self.assertTrue(all(item.source_uri for item in result.citations))
         system, user = self.model.calls[0]
         self.assertIn("不可信数据", system)
@@ -88,3 +96,21 @@ class GenerationTests(unittest.TestCase):
         ):
             with self.subTest(endpoint=endpoint), self.assertRaises(ValueError):
                 LocalOpenAIChatModel(endpoint, "local-model")
+
+    def test_filters_apply_before_generation(self) -> None:
+        result = self.rag.answer("限制读取范围", self.source_id, file_type=".txt")
+        self.assertTrue(result.insufficient_evidence)
+        self.assertEqual(self.model.calls, [])
+
+    def test_query_normalization_and_length_limit(self) -> None:
+        result = self.rag.answer("  如何\t限制读取范围  ", self.source_id)
+        self.assertFalse(result.insufficient_evidence)
+        with self.assertRaisesRegex(ValueError, "500"):
+            self.rag.answer("问" * 501, self.source_id)
+
+    def test_unsupported_claim_fails_closed(self) -> None:
+        model = UnsupportedClaimModel()
+        service = RAGService(self.rag.retrieval, self.rag.context, model)
+        result = service.answer("如何限制读取范围", self.source_id)
+        self.assertTrue(result.insufficient_evidence)
+        self.assertIn("未通过逐句来源支持检查", result.answer)

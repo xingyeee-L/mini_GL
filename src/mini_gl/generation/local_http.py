@@ -6,6 +6,8 @@ import http.client
 import json
 from urllib.parse import urlparse
 
+from mini_gl.generation.models import ChatResponse
+
 
 class LocalOpenAIChatModel:
     def __init__(self, endpoint: str, model: str, *, timeout_seconds: float = 120.0) -> None:
@@ -23,7 +25,7 @@ class LocalOpenAIChatModel:
         self.timeout_seconds = timeout_seconds
         self.name = f"local-openai:{model}"
 
-    def generate(self, *, system_prompt: str, user_prompt: str) -> str:
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
         payload = json.dumps(
             {
                 "model": self.model,
@@ -59,4 +61,13 @@ class LocalOpenAIChatModel:
             raise RuntimeError("Local model returned an invalid response") from exc
         if not isinstance(answer, str) or not answer.strip():
             raise RuntimeError("Local model returned an empty answer")
-        return answer.strip()
+        usage = value.get("usage", {})
+        return ChatResponse(
+            answer.strip(),
+            _optional_int(usage.get("prompt_tokens")),
+            _optional_int(usage.get("completion_tokens")),
+        )
+
+
+def _optional_int(value: object) -> int | None:
+    return value if isinstance(value, int) and value >= 0 else None

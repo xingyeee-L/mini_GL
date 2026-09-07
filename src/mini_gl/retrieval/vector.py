@@ -113,12 +113,29 @@ class VectorSearchService:
             "dimension": self.provider.dimension,
         }
 
-    def search(self, query: str, source_id: str, limit: int = 10) -> list[dict[str, object]]:
+    def search(
+        self,
+        query: str,
+        source_id: str,
+        limit: int = 10,
+        *,
+        file_type: str | None = None,
+        updated_after: str | None = None,
+    ) -> list[dict[str, object]]:
         query_vector = self.provider.embed_query(query)
+        normalized_type = file_type.lower() if file_type else None
         rows = self.store.connection.execute(
             "SELECT l.*,v.vector FROM vector_chunks v JOIN lexical_chunks l "
-            "ON l.chunk_id=v.chunk_id WHERE v.provider=? AND v.source_id=?",
-            (self.provider.name, source_id),
+            "ON l.chunk_id=v.chunk_id WHERE v.provider=? AND v.source_id=? "
+            "AND (? IS NULL OR l.file_type=?) AND (? IS NULL OR l.updated_at>=?)",
+            (
+                self.provider.name,
+                source_id,
+                normalized_type,
+                normalized_type,
+                updated_after,
+                updated_after,
+            ),
         ).fetchall()
         results: list[VectorResult] = []
         for row in rows:

@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--endpoint", default="http://127.0.0.1:11434/v1/chat/completions"
     )
     ask.add_argument("--limit", type=int, default=10)
+    ask.add_argument("--file-type", choices=(".txt", ".md"))
+    ask.add_argument("--updated-after")
     ask.add_argument(
         "--provider",
         choices=("deterministic", "bge-small-zh", "multilingual-e5"),
@@ -176,7 +178,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                     model = LocalOpenAIChatModel(args.endpoint, args.model)
                     answer = RAGService(
                         hybrid_retrieval, ContextBuilder(store), model
-                    ).answer(args.query, args.source_id, limit=args.limit)
+                    ).answer(
+                        args.query,
+                        args.source_id,
+                        limit=args.limit,
+                        file_type=args.file_type,
+                        updated_after=args.updated_after,
+                    )
                     print(json.dumps(asdict(answer), ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
