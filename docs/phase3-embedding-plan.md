@@ -19,7 +19,8 @@ hardware fit. Runtime must support a strict offline mode and must never silently
 
 ## Fair comparison
 
-- Keep the 15-document, 25-query Chinese fixture frozen.
+- Keep each published fixture version frozen; use the 30-document, 60-query version-two fixture for
+  current comparisons while retaining all version-one cases as regression anchors.
 - Compare lexical-only, vector-only, hybrid, and hybrid-plus-reranker.
 - Record Recall@5, Recall@10, MRR, forbidden-result rate, P50/P95 latency, peak memory, index size,
   and cold-start time.
@@ -45,3 +46,20 @@ Frozen 15-document/25-query benchmark:
 Indexing 15 documents took approximately 238 ms on CPU. Hybrid retrieval provides the best MRR;
 vector-only has slightly better Recall@5. The next iteration should tune fusion using a larger
 fixture rather than optimizing these 25 queries directly.
+
+## Expanded benchmark result
+
+The version-two benchmark contains 30 documents and 60 queries, including paraphrases, hard
+negatives, overlapping targets, permissions, local-only operation, prompt injection, and index
+lifecycle questions.
+
+| Route | Recall@5 | Recall@10 | MRR | Forbidden | P50 | P95 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| BM25 | 0.6750 | 0.6750 | 0.6589 | 0.0 | 0.83 ms | 1.03 ms |
+| BGE vector | 0.9083 | 0.9583 | 0.7868 | 0.0 | 12.93 ms | 14.94 ms |
+| BGE + BM25 + reranker | 0.9250 | 0.9750 | 0.8062 | 0.0 | 16.18 ms | 18.41 ms |
+
+Indexing 30 documents took approximately 316 ms on CPU. On this larger set, hybrid retrieval now
+leads both Recall@5 and MRR while preserving a zero forbidden-result rate. This supports continuing
+with the current architecture, but it is not yet a final model-selection result: peak memory,
+incremental index updates, and at least one comparison model remain open.

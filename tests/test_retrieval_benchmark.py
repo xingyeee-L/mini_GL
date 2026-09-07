@@ -16,9 +16,9 @@ FIXTURE = Path(__file__).parent / "fixtures" / "synthetic" / "retrieval_benchmar
 class ChineseRetrievalBenchmarkTests(unittest.TestCase):
     def test_expanded_synthetic_benchmark(self) -> None:
         benchmark = json.loads(FIXTURE.read_text(encoding="utf-8"))
-        self.assertEqual(benchmark["version"], 1)
-        self.assertGreaterEqual(len(benchmark["documents"]), 15)
-        self.assertGreaterEqual(len(benchmark["queries"]), 25)
+        self.assertEqual(benchmark["version"], 2)
+        self.assertGreaterEqual(len(benchmark["documents"]), 30)
+        self.assertGreaterEqual(len(benchmark["queries"]), 60)
 
         with tempfile.TemporaryDirectory() as temp_dir:
             base = Path(temp_dir)

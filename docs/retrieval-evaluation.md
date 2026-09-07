@@ -88,3 +88,26 @@ informative-term coverage were added without changing the fixture:
 
 The remaining misses are retained as phase 3 semantic targets rather than encoded into a
 benchmark-specific synonym table.
+
+## Version-two Chinese benchmark
+
+The second frozen benchmark doubles the corpus to 30 fictional documents and expands the query
+set from 25 to 60. The added cases cover access scopes, chunk identity, incremental vectors,
+strictly offline model loading, rank fusion, reranking, model selection, performance budgets,
+citations, prompt injection, deterministic filters, derived-data deletion, local API protection,
+privacy-safe logging, and index versioning. It deliberately includes paraphrases, overlapping
+concepts, hard negatives, multiple relevant documents, and restricted-source decoys.
+
+Observed lexical baseline on 2026-09-07:
+
+- Recall@5: 0.675
+- Recall@10: 0.675
+- MRR: 0.6589
+- Forbidden-result rate: 0.0
+- P50 latency: approximately 0.83 ms
+- P95 latency: approximately 1.03 ms
+
+The higher MRR does not mean the new set is easier overall: many new questions use vocabulary
+present in their target documents, while the retained paraphrase failures still expose the hard
+semantic boundary. The version and minimum corpus/query counts are asserted in tests so accidental
+shrinkage cannot make later model comparisons look better.
