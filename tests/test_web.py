@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from mini_gl.generation.models import ChatResponse
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
 from mini_gl.storage.sqlite import SQLiteStore
@@ -29,6 +30,7 @@ class WebAcceptanceTests(unittest.TestCase):
             self.source_id = source.source_id
         self.server = make_server(self.db, port=0)
         self.server.embedding_provider = DeterministicLocalEmbedding(64)
+        self.server.chat_model = FakeChatModel()
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -39,15 +41,15 @@ class WebAcceptanceTests(unittest.TestCase):
         self.thread.join()
         self.temp.cleanup()
 
-    def _get_json(self, path: str) -> object:
+    def _get_json(self, path: str) -> dict[str, object]:
         request = Request(  # noqa: S310 - fixed loopback URL
             self.base_url + path,
             headers={"X-Mini-GL-CSRF": self.server.csrf_token},
         )
         with urlopen(request, timeout=2) as response:  # noqa: S310 - fixed loopback URL
-            return json.load(response)
+            return json.load(response)  # type: ignore[no-any-return]
 
-    def _post_json(self, path: str, body: dict[str, str]) -> object:
+    def _post_json(self, path: str, body: dict[str, str]) -> dict[str, object]:
         request = Request(  # noqa: S310 - fixed loopback URL
             self.base_url + path,
             data=json.dumps(body).encode(),
@@ -55,7 +57,7 @@ class WebAcceptanceTests(unittest.TestCase):
             headers={"X-Mini-GL-CSRF": self.server.csrf_token},
         )
         with urlopen(request, timeout=2) as response:  # noqa: S310 - fixed loopback URL
-            return json.load(response)
+            return json.load(response)  # type: ignore[no-any-return]
 
     def test_page_and_privacy_safe_file_status(self) -> None:
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
@@ -97,3 +99,22 @@ class WebAcceptanceTests(unittest.TestCase):
             f"/api/hybrid-search?source_id={self.source_id}&q=secret%20body"
         )
         self.assertEqual(result["results"][0]["title"], "visible-name.txt")
+
+    def test_visual_grounded_answer_flow(self) -> None:
+        body = {"source_id": self.source_id}
+        self._post_json("/api/index", body)
+        self._post_json("/api/vector-index", body)
+        result = self._post_json(
+            "/api/ask", {"source_id": self.source_id, "query": "secret body"}
+        )
+        self.assertEqual(result["answer"], "secret body[来源 1]。")
+        self.assertFalse(result["insufficient_evidence"])
+        self.assertEqual(result["citations"][0]["title"], "visible-name.txt")
+        self.assertEqual(result["prompt_tokens"], 12)
+
+
+class FakeChatModel:
+    name = "fake-local-model"
+
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
+        return ChatResponse("secret body[来源 1]。", 12, 6)
