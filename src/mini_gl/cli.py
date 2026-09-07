@@ -7,6 +7,7 @@ import io
 import json
 import sys
 from collections.abc import Callable, Sequence
+from dataclasses import asdict
 from pathlib import Path
 
 from mini_gl.ingestion import IngestionService
@@ -62,10 +63,34 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("deterministic", "bge-small-zh", "multilingual-e5"),
         default="deterministic",
     )
+    ask = subparsers.add_parser("ask", help="Ask a grounded question using a local chat model")
+    ask.add_argument("source_id")
+    ask.add_argument("query")
+    ask.add_argument("--model", required=True)
+    ask.add_argument(
+        "--endpoint", default="http://127.0.0.1:11434/v1/chat/completions"
+    )
+    ask.add_argument("--limit", type=int, default=10)
+    ask.add_argument(
+        "--provider",
+        choices=("deterministic", "bge-small-zh", "multilingual-e5"),
+        default="bge-small-zh",
+    )
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
-    commands = (register, sync, status, index, search, vector_index, incremental, hybrid, serve)
+    commands = (
+        register,
+        sync,
+        status,
+        index,
+        search,
+        vector_index,
+        incremental,
+        hybrid,
+        ask,
+        serve,
+    )
     for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
     return parser
@@ -136,11 +161,23 @@ def main(argv: Sequence[str] | None = None) -> int:
                             sort_keys=True,
                         )
                     )
-                else:
+                elif args.command == "hybrid-search":
                     results = HybridSearchService(
                         lexical, vector, TokenOverlapReranker()
                     ).search(args.query, args.source_id, args.limit)
                     print(json.dumps({"results": results}, ensure_ascii=False, indent=2))
+                else:
+                    from mini_gl.generation import LocalOpenAIChatModel, RAGService
+                    from mini_gl.generation.context import ContextBuilder
+
+                    hybrid_retrieval = HybridSearchService(
+                        lexical, vector, TokenOverlapReranker()
+                    )
+                    model = LocalOpenAIChatModel(args.endpoint, args.model)
+                    answer = RAGService(
+                        hybrid_retrieval, ContextBuilder(store), model
+                    ).answer(args.query, args.source_id, limit=args.limit)
+                    print(json.dumps(asdict(answer), ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))

@@ -61,6 +61,7 @@ class HybridSearchService:
                     _number(item.get("fusion_score", 0.0)) + weight / (60 + rank)
                 )
                 item[f"{channel}_rank"] = rank
+                item[f"{channel}_score"] = result["score"]
         results = list(fused.values())
         results.sort(
             key=lambda result: (-_number(result["fusion_score"]), str(result["chunk_id"]))

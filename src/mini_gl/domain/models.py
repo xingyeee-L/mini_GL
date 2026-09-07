@@ -66,3 +66,12 @@ class Citation:
     timestamp_start: datetime | None = None
     timestamp_end: datetime | None = None
 
+
+@dataclass(frozen=True, slots=True)
+class GroundedAnswer:
+    answer: str
+    citations: tuple[Citation, ...]
+    insufficient_evidence: bool
+    model: str | None
+    retrieval_ms: float
+    generation_ms: float
