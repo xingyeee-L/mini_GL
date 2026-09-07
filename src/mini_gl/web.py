@@ -14,8 +14,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
+from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
 from mini_gl.retrieval.lexical import LexicalSearchService
+from mini_gl.retrieval.vector import VectorSearchService
 from mini_gl.security.paths import PathPolicy
 from mini_gl.storage.sqlite import SQLiteStore
 
@@ -33,11 +36,11 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px;bor
 @media(max-width:650px){.flow{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}.table{overflow:auto}}
 </style></head><body><header class="top"><h1>🧠 mini_GL · 本地数据与搜索验收台</h1><span class="safe">🛡 只读 · 仅本机</span></header>
 <main><section class="panel"><h2>1. 注册测试资料目录</h2><form id="register" class="row"><label>目录绝对路径<input name="root" required placeholder="C:\\path\\to\\test-files"></label><button class="primary">注册</button></form></section>
-<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
+<section class="panel"><h2>2. 选择数据源并同步</h2><div class="row"><label>数据源<select id="sources"></select></label><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="vector-index">构建向量工程索引</button><button id="refresh">刷新状态</button></div><p id="message" class="muted" aria-live="polite">正在读取本地状态…</p></section>
 <section class="panel"><div class="flow"><div><b>✓</b>授权目录</div><div><b>✓</b>安全扫描</div><div><b>✓</b>文本解析</div><div><b>✓</b>标准化</div><div><b>✓</b>原子保存</div></div></section>
 <section class="panel"><h2>3. 最近一次同步结果</h2><div class="metrics"><div class="metric"><span>新增</span><strong id="created">0</strong></div><div class="metric"><span>更新</span><strong id="updated">0</strong></div><div class="metric"><span>未变化</span><strong id="unchanged">0</strong></div><div class="metric"><span>删除</span><strong id="deleted">0</strong></div></div></section>
 <section class="panel"><h2>4. 文件状态（不显示正文）</h2><div class="table"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>
-<section class="panel"><h2>5. 中文关键词检索</h2><form id="search-form" class="row"><label>查询<input name="query" required placeholder="例如：项目安全边界"></label><label>文件类型<select name="file_type"><option value="">全部</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select></label><button class="primary">搜索</button></form><p id="search-status" class="muted" aria-live="polite">请先重建关键词索引。</p><div class="table"><table><thead><tr><th>来源</th><th>相关片段</th><th>分数</th></tr></thead><tbody id="results"></tbody></table></div></section>
+<section class="panel"><h2>5. 本地检索</h2><form id="search-form" class="row"><label>查询<input name="query" required placeholder="例如：项目安全边界"></label><label>检索方式<select name="mode"><option value="lexical">关键词 BM25</option><option value="hybrid">混合检索（工程提供者）</option></select></label><label>文件类型<select name="file_type"><option value="">全部</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select></label><button class="primary">搜索</button></form><p id="search-status" class="muted" aria-live="polite">请先构建相应索引。混合模式当前只验证本地架构，不代表真实语义质量。</p><div class="table"><table><thead><tr><th>来源</th><th>相关片段</th><th>分数</th></tr></thead><tbody id="results"></tbody></table></div></section>
 <section class="panel"><h2>6. 固定中文基准</h2><div class="metrics"><div class="metric"><span>Recall@5</span><strong>0.66</strong></div><div class="metric"><span>MRR</span><strong>0.56</strong></div><div class="metric"><span>禁止结果率</span><strong>0</strong></div><div class="metric"><span>P95</span><strong>0.49 ms</strong></div></div><p class="muted">15 篇虚构文档 · 25 条查询 · 基准文件保持冻结</p></section>
 </main><script>
 const token=__TOKEN__;const el=id=>document.getElementById(id);let sources=[];
@@ -49,7 +52,8 @@ function escapeHtml(v){const d=document.createElement('div');d.textContent=v;ret
 el('register').addEventListener('submit',async e=>{e.preventDefault();try{const root=new FormData(e.target).get('root');await api('/api/register',{method:'POST',body:JSON.stringify({root})});await load(false)}catch(x){el('message').textContent=x.message;el('message').className='error'}});
 el('sync').addEventListener('click',async()=>{try{el('message').textContent='正在安全扫描并同步…';const id=el('sources').value;await api('/api/sync',{method:'POST',body:JSON.stringify({source_id:id})});await detail()}catch(x){el('message').textContent='同步已回滚：'+x.message;el('message').className='error'}});el('refresh').onclick=()=>load();el('sources').onchange=detail;load();
 el('index').addEventListener('click',async()=>{try{const id=el('sources').value;const out=await api('/api/index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`索引完成：${out.documents} 个文档，${out.chunks} 个片段`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
-el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const out=await api('/api/search?'+params);el('search-status').textContent=`找到 ${out.results.length} 条结果 · ${out.elapsed_ms} ms`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');const source=document.createElement('td');source.textContent=r.title+' · '+r.file_type+' ';const reveal=document.createElement('button');reveal.textContent='在文件夹中显示';reveal.addEventListener('click',()=>api('/api/reveal',{method:'POST',body:JSON.stringify({source_id:r.source_id,document_id:r.document_id})}));source.append(reveal);for(const value of [r.snippet,r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}tr.prepend(source);return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
+el('vector-index').addEventListener('click',async()=>{try{const id=el('sources').value;const out=await api('/api/vector-index',{method:'POST',body:JSON.stringify({source_id:id})});el('search-status').textContent=`向量工程索引完成：${out.chunks} 个片段，${out.dimension} 维`}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
+el('search-form').addEventListener('submit',async e=>{e.preventDefault();try{const form=new FormData(e.target);const params=new URLSearchParams({q:String(form.get('query')),source_id:el('sources').value});const type=String(form.get('file_type'));if(type)params.set('file_type',type);const mode=String(form.get('mode'));const out=await api((mode==='hybrid'?'/api/hybrid-search?':'/api/search?')+params);el('search-status').textContent=`找到 ${out.results.length} 条结果${out.elapsed_ms===undefined?'':' · '+out.elapsed_ms+' ms'}`;el('results').replaceChildren(...out.results.map(r=>{const tr=document.createElement('tr');const source=document.createElement('td');source.textContent=r.title+' · '+r.file_type+' ';const reveal=document.createElement('button');reveal.textContent='在文件夹中显示';reveal.addEventListener('click',()=>api('/api/reveal',{method:'POST',body:JSON.stringify({source_id:r.source_id,document_id:r.document_id})}));source.append(reveal);for(const value of [r.snippet,r.rerank_score??r.score]){const td=document.createElement('td');td.textContent=String(value);tr.append(td)}tr.prepend(source);return tr}))}catch(x){el('search-status').textContent=x.message;el('search-status').className='error'}});
 </script></body></html>"""
 
 
@@ -120,6 +124,15 @@ class Handler(BaseHTTPRequestHandler):
                         file_type=query.get("file_type", [None])[0],
                     )
                     self._json(result)
+                elif path == "/api/hybrid-search":
+                    query = parse_qs(urlparse(self.path).query)
+                    source_id = query.get("source_id", [""])[0]
+                    lexical = LexicalSearchService(store)
+                    vector = VectorSearchService(store, DeterministicLocalEmbedding())
+                    results = HybridSearchService(
+                        lexical, vector, TokenOverlapReranker()
+                    ).search(query.get("q", [""])[0], source_id)
+                    self._json({"results": results})
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -140,6 +153,11 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(service.sync(str(body["source_id"])))
                 elif self.path == "/api/index":
                     self._json(LexicalSearchService(store).rebuild(str(body["source_id"])))
+                elif self.path == "/api/vector-index":
+                    provider = DeterministicLocalEmbedding()
+                    self._json(
+                        VectorSearchService(store, provider).rebuild(str(body["source_id"]))
+                    )
                 elif self.path == "/api/reveal":
                     path = resolve_document_path(
                         store, str(body["source_id"]), str(body["document_id"])

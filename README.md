@@ -91,3 +91,14 @@ python -m mini_gl search "安全边界" --source-id <source-id>
 
 The search command also supports `--file-type`, `--updated-after`, and `--limit`. The visual
 console exposes the same indexing and search service without sending data over the network.
+
+## Phase 3 engineering slice
+
+The first hybrid-search slice adds a typed local embedding boundary, persistent vector records,
+cosine search, reciprocal-rank fusion, and a replaceable reranker. Its dependency-free provider is
+for plumbing and privacy verification only; it is not presented as a semantic model.
+
+```powershell
+python -m mini_gl vector-index <source-id>
+python -m mini_gl hybrid-search <source-id> "断电后如何恢复"
+```

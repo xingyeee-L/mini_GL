@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -33,15 +35,25 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("--file-type", choices=(".txt", ".md"))
     search.add_argument("--updated-after")
     search.add_argument("--limit", type=int, default=10)
+    vector_index = subparsers.add_parser(
+        "vector-index", help="Build the offline engineering vector index"
+    )
+    vector_index.add_argument("source_id")
+    hybrid = subparsers.add_parser("hybrid-search", help="Run local lexical/vector fusion")
+    hybrid.add_argument("source_id")
+    hybrid.add_argument("query")
+    hybrid.add_argument("--limit", type=int, default=10)
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
-    for command in (register, sync, status, index, search, serve):
+    for command in (register, sync, status, index, search, vector_index, hybrid, serve):
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
     try:
         if args.command == "serve":
@@ -58,7 +70,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(service.sync(args.source_id), sort_keys=True))
             elif args.command == "status":
                 print(json.dumps(store.status(args.source_id), ensure_ascii=False, indent=2))
-            else:
+            elif args.command in {"index", "search"}:
                 from mini_gl.retrieval.lexical import LexicalSearchService
 
                 retrieval = LexicalSearchService(store)
@@ -73,6 +85,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                         limit=args.limit,
                     )
                     print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
+                from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
+                from mini_gl.retrieval.lexical import LexicalSearchService
+                from mini_gl.retrieval.vector import VectorSearchService
+
+                lexical = LexicalSearchService(store)
+                vector = VectorSearchService(store, DeterministicLocalEmbedding())
+                if args.command == "vector-index":
+                    print(json.dumps(vector.rebuild(args.source_id), sort_keys=True))
+                else:
+                    results = HybridSearchService(
+                        lexical, vector, TokenOverlapReranker()
+                    ).search(args.query, args.source_id, args.limit)
+                    print(json.dumps({"results": results}, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:
         print(json.dumps({"error": type(exc).__name__, "message": str(exc)}))

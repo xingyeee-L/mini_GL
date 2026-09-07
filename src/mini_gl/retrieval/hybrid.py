@@ -1,0 +1,70 @@
+"""Rank fusion and replaceable local reranking."""
+
+from __future__ import annotations
+
+from typing import Protocol, cast
+
+from mini_gl.retrieval.lexical import LexicalSearchService, tokenize
+from mini_gl.retrieval.vector import VectorSearchService
+
+
+class Reranker(Protocol):
+    name: str
+
+    def rerank(self, query: str, results: list[dict[str, object]]) -> list[dict[str, object]]: ...
+
+
+class TokenOverlapReranker:
+    name = "token-overlap-v1"
+
+    def rerank(self, query: str, results: list[dict[str, object]]) -> list[dict[str, object]]:
+        query_terms = set(tokenize(query))
+        for result in results:
+            text = f"{result['title']} {result['snippet']}"
+            overlap = len(query_terms & set(tokenize(text))) / max(1, len(query_terms))
+            result["rerank_score"] = round(overlap, 6)
+        return sorted(
+            results,
+            key=lambda result: (
+                -_number(result["rerank_score"]),
+                -_number(result["fusion_score"]),
+                str(result["chunk_id"]),
+            ),
+        )
+
+
+class HybridSearchService:
+    def __init__(
+        self,
+        lexical: LexicalSearchService,
+        vector: VectorSearchService,
+        reranker: Reranker | None = None,
+    ) -> None:
+        self.lexical = lexical
+        self.vector = vector
+        self.reranker = reranker
+
+    def search(self, query: str, source_id: str, limit: int = 10) -> list[dict[str, object]]:
+        lexical_response = self.lexical.search(query, source_id=source_id, limit=50)
+        lexical_rows = cast(list[dict[str, object]], lexical_response["results"])
+        vector_rows = self.vector.search(query, source_id, limit=50)
+        fused: dict[str, dict[str, object]] = {}
+        for channel, rows in (("lexical", lexical_rows), ("vector", vector_rows)):
+            for rank, result in enumerate(rows, 1):
+                chunk_id = str(result["chunk_id"])
+                item = fused.setdefault(chunk_id, dict(result))
+                item["fusion_score"] = _number(item.get("fusion_score", 0.0)) + 1 / (60 + rank)
+                item[f"{channel}_rank"] = rank
+        results = list(fused.values())
+        results.sort(
+            key=lambda result: (-_number(result["fusion_score"]), str(result["chunk_id"]))
+        )
+        if self.reranker:
+            results = self.reranker.rerank(query, results)
+        return results[: max(1, min(limit, 50))]
+
+
+def _number(value: object) -> float:
+    if not isinstance(value, (int, float)):
+        raise TypeError("Expected a numeric ranking score")
+    return float(value)

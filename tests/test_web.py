@@ -45,10 +45,21 @@ class WebAcceptanceTests(unittest.TestCase):
         with urlopen(request, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             return json.load(response)
 
+    def _post_json(self, path: str, body: dict[str, str]) -> object:
+        request = Request(  # noqa: S310 - fixed loopback URL
+            self.base_url + path,
+            data=json.dumps(body).encode(),
+            method="POST",
+            headers={"X-Mini-GL-CSRF": self.server.csrf_token},
+        )
+        with urlopen(request, timeout=2) as response:  # noqa: S310 - fixed loopback URL
+            return json.load(response)
+
     def test_page_and_privacy_safe_file_status(self) -> None:
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             page = response.read().decode()
         self.assertIn("本地数据与搜索验收台", page)
+        self.assertIn("构建向量工程索引", page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)
@@ -74,3 +85,13 @@ class WebAcceptanceTests(unittest.TestCase):
             self.assertEqual(resolved.name, "visible-name.txt")
             with self.assertRaisesRegex(ValueError, "current source snapshot"):
                 resolve_document_path(store, self.source_id, "unknown-document")
+
+    def test_visual_hybrid_search_flow(self) -> None:
+        body = {"source_id": self.source_id}
+        self._post_json("/api/index", body)
+        indexed = self._post_json("/api/vector-index", body)
+        self.assertEqual(indexed["chunks"], 1)
+        result = self._get_json(
+            f"/api/hybrid-search?source_id={self.source_id}&q=secret%20body"
+        )
+        self.assertEqual(result["results"][0]["title"], "visible-name.txt")
