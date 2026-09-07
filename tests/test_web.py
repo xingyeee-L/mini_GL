@@ -12,7 +12,7 @@ from mini_gl.generation.models import ChatResponse
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
 from mini_gl.storage.sqlite import SQLiteStore
-from mini_gl.web import make_server, resolve_document_path
+from mini_gl.web import make_server, resolve_document_path, source_preview
 
 
 class WebAcceptanceTests(unittest.TestCase):
@@ -97,6 +97,22 @@ class WebAcceptanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "current source snapshot"):
                 resolve_document_path(store, self.source_id, "unknown-document")
 
+    def test_source_preview_requires_current_snapshot_and_is_bounded(self) -> None:
+        with SQLiteStore(self.db) as store:
+            document_id = store.connection.execute(
+                "SELECT document_id FROM documents WHERE source_id=?", (self.source_id,)
+            ).fetchone()[0]
+            preview = source_preview(store, self.source_id, document_id)
+            self.assertEqual(preview["source_type"], "本地文件")
+            self.assertEqual(preview["content"], "secret body")
+            with self.assertRaisesRegex(ValueError, "authorized snapshot"):
+                source_preview(store, self.source_id, "unknown-document")
+        api_preview = self._post_json(
+            "/api/source-preview",
+            {"source_id": self.source_id, "document_id": document_id},
+        )
+        self.assertEqual(api_preview["title"], "visible-name.txt")
+
     def test_visual_hybrid_search_flow(self) -> None:
         body = {"source_id": self.source_id}
         self._post_json("/api/index", body)
@@ -152,6 +168,12 @@ class WebAcceptanceTests(unittest.TestCase):
                 "SELECT document_id FROM documents WHERE source_id=?", (source_id,)
             ).fetchone()[0]
             self.assertEqual(resolve_document_path(store, source_id, document_id), chat)
+            preview = source_preview(store, source_id, document_id)
+            self.assertEqual(preview["source_type"], "聊天记录")
+            self.assertEqual(preview["conversation_id"], "chat-1")
+            self.assertEqual(preview["participants"], ["a"])
+            self.assertEqual(preview["timestamp_start"], "2026-01-01T09:00:00+08:00")
+            self.assertIn("测试消息", str(preview["content"]))
 
     def test_visual_source_pause_and_confirmed_derived_delete(self) -> None:
         paused = self._post_json(

@@ -17,6 +17,9 @@ wrapped by a desktop shell without changing ingestion, retrieval, or generation 
   service logic.
 - Allow deletion of application-owned derived data only after typing the source-ID suffix. The
   registered source and original files remain untouched.
+- Let users expand a current search result or answer citation in a modal. The modal shows the
+  source type, authorized location, access scope, time range, conversation identifier,
+  participants, and a bounded plain-text preview. It never interprets source content as HTML.
 
 ## Safety invariants
 
@@ -24,4 +27,5 @@ The server binds only to loopback, requires a per-process CSRF token, caps reque
 restrictive content security policy, and does not log prompts or document content. Source-derived
 labels are inserted using text nodes or escaped before HTML insertion. Destructive derived-data
 operations require an explicit, reviewable confirmation and are covered by source-preservation
-tests.
+tests. Source preview is limited to documents in the current authorized snapshot and to 20,000
+characters, with every displayed source field rendered through text-only DOM APIs.
