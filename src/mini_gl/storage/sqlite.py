@@ -54,7 +54,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 3:
+        if version > 4:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -163,6 +163,28 @@ class SQLiteStore:
                 );
                 CREATE INDEX vector_chunks_source_idx ON vector_chunks(source_id);
                 PRAGMA user_version = 3;
+                """
+            )
+            self.connection.commit()
+            version = 3
+        if version == 3:
+            self.connection.executescript(
+                """
+                CREATE TABLE vector_chunks_v4 (
+                    chunk_id TEXT NOT NULL
+                        REFERENCES lexical_chunks(chunk_id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+                    provider TEXT NOT NULL,
+                    dimension INTEGER NOT NULL,
+                    vector BLOB NOT NULL,
+                    PRIMARY KEY(chunk_id, provider)
+                );
+                INSERT INTO vector_chunks_v4
+                    SELECT chunk_id,source_id,provider,dimension,vector FROM vector_chunks;
+                DROP TABLE vector_chunks;
+                ALTER TABLE vector_chunks_v4 RENAME TO vector_chunks;
+                CREATE INDEX vector_chunks_source_idx ON vector_chunks(source_id, provider);
+                PRAGMA user_version = 4;
                 """
             )
             self.connection.commit()

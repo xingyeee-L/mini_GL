@@ -56,10 +56,28 @@ lifecycle questions.
 | Route | Recall@5 | Recall@10 | MRR | Forbidden | P50 | P95 |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | BM25 | 0.6750 | 0.6750 | 0.6589 | 0.0 | 0.83 ms | 1.03 ms |
-| BGE vector | 0.9083 | 0.9583 | 0.7868 | 0.0 | 12.93 ms | 14.94 ms |
-| BGE + BM25 + reranker | 0.9250 | 0.9750 | 0.8062 | 0.0 | 16.18 ms | 18.41 ms |
+| BGE vector | 0.9083 | 0.9583 | 0.7868 | 0.0 | 12.06 ms | 13.40 ms |
+| BGE hybrid | 0.9417 | 0.9917 | 0.7994 | 0.0 | 14.42 ms | 15.86 ms |
+| E5 vector | 0.9333 | 1.0000 | 0.8189 | 0.0 | 20.81 ms | 23.58 ms |
+| E5 hybrid | 0.9250 | 1.0000 | 0.7957 | 0.0 | 22.33 ms | 25.15 ms |
 
-Indexing 30 documents took approximately 316 ms on CPU. On this larger set, hybrid retrieval now
-leads both Recall@5 and MRR while preserving a zero forbidden-result rate. This supports continuing
-with the current architecture, but it is not yet a final model-selection result: peak memory,
-incremental index updates, and at least one comparison model remain open.
+BGE loaded cold in approximately 10.4 seconds, indexed 30 vectors in 255 ms, used 60 KiB of vector
+storage, and reached a process peak working set of 578 MiB. E5 loaded in approximately 12.3 seconds,
+indexed in 442 ms, used 45 KiB, and reached 894 MiB. E5 vector-only has the highest absolute quality,
+but BGE is materially faster and lighter, and the chosen BGE hybrid route exceeds both BM25 and BGE
+vector-only on Recall@5, Recall@10, and MRR while keeping forbidden results at zero.
+
+## Phase-three decision
+
+- Default provider: pinned `BAAI/bge-small-zh-v1.5`, strictly offline on CPU.
+- Comparison provider: pinned `intfloat/multilingual-e5-small` with required `query:` and `passage:`
+  prefixes. It remains available when higher vector-only quality is worth the memory and latency.
+- Fusion: vector-weighted RRF plus a bounded lexical-overlap adjustment; lexical evidence cannot
+  overwrite the semantic ranking by itself.
+- Incremental lifecycle: stable lexical chunks retain their vectors, new or changed chunks alone
+  are embedded, and deleted documents cascade only into application-owned derived indexes.
+- Storage: provider is part of the vector primary key, so pinned model indexes can coexist and be
+  switched without corrupting each other.
+
+Phase three is complete for the current 30-document/60-query acceptance set. Larger-corpus stress
+testing and GPU measurements belong to phase seven, rather than blocking the retrieval architecture.

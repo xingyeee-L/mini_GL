@@ -12,6 +12,18 @@ from mini_gl.retrieval.vector import VectorSearchService
 from mini_gl.storage.sqlite import SQLiteStore
 
 
+class CountingEmbedding(DeterministicLocalEmbedding):
+    name = "counting-test-v1"
+
+    def __init__(self) -> None:
+        super().__init__(64)
+        self.embedded = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.embedded += len(texts)
+        return super().embed(texts)
+
+
 class HybridRetrievalTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -58,3 +70,34 @@ class HybridRetrievalTests(unittest.TestCase):
     def test_provider_rejects_invalid_dimension(self) -> None:
         with self.assertRaisesRegex(ValueError, "at least 32"):
             DeterministicLocalEmbedding(8)
+
+    def test_incremental_index_reuses_updates_and_deletes_vectors(self) -> None:
+        provider = CountingEmbedding()
+        vector = VectorSearchService(self.store, provider)
+        first = vector.sync(self.source.source_id)
+        self.assertEqual(first["embedded"], 2)
+
+        second = vector.sync(self.source.source_id)
+        self.assertEqual(second["embedded"], 0)
+        self.assertEqual(second["reused"], 2)
+
+        root = self.source.root_path
+        (root / "security.md").write_text("系统拒绝符号链接和目录联接。", encoding="utf-8")
+        (root / "recovery.md").unlink()
+        IngestionService(self.store).sync(self.source.source_id)
+        lexical = self.lexical.sync(self.source.source_id)
+        updated = vector.sync(self.source.source_id)
+
+        self.assertEqual(lexical["created"], 1)
+        self.assertEqual(lexical["deleted"], 1)
+        self.assertEqual(updated["embedded"], 1)
+        self.assertEqual(updated["chunks"], 1)
+        self.assertEqual(provider.embedded, 3)
+
+    def test_multiple_provider_indexes_can_coexist(self) -> None:
+        other = CountingEmbedding()
+        VectorSearchService(self.store, other).sync(self.source.source_id)
+        providers = self.store.connection.execute(
+            "SELECT COUNT(DISTINCT provider) FROM vector_chunks"
+        ).fetchone()[0]
+        self.assertEqual(providers, 2)

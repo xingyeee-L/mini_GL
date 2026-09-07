@@ -42,7 +42,9 @@ class VectorSearchService:
         values: list[tuple[object, ...]] = []
         for start in range(0, len(rows), batch_size):
             batch = rows[start : start + batch_size]
-            vectors = self.provider.embed([f"{row['title']} {row['content']}" for row in batch])
+            vectors = self.provider.embed_documents(
+                [f"{row['title']} {row['content']}" for row in batch]
+            )
             for row, vector in zip(batch, vectors, strict=True):
                 if len(vector) != self.provider.dimension:
                     raise ValueError("Embedding provider returned an invalid dimension")
@@ -70,8 +72,49 @@ class VectorSearchService:
             )
         return {"chunks": len(values), "dimension": self.provider.dimension}
 
+    def sync(self, source_id: str, batch_size: int = 32) -> dict[str, int]:
+        """Embed only lexical chunks missing for this provider and source."""
+        rows = self.store.connection.execute(
+            "SELECT l.chunk_id,l.source_id,l.title,l.content FROM lexical_chunks l "
+            "LEFT JOIN vector_chunks v ON v.chunk_id=l.chunk_id AND v.provider=? "
+            "WHERE l.source_id=? AND v.chunk_id IS NULL ORDER BY l.chunk_id",
+            (self.provider.name, source_id),
+        ).fetchall()
+        values: list[tuple[object, ...]] = []
+        for start in range(0, len(rows), batch_size):
+            batch = rows[start : start + batch_size]
+            vectors = self.provider.embed_documents(
+                [f"{row['title']} {row['content']}" for row in batch]
+            )
+            for row, vector in zip(batch, vectors, strict=True):
+                if len(vector) != self.provider.dimension:
+                    raise ValueError("Embedding provider returned an invalid dimension")
+                values.append(
+                    (
+                        row["chunk_id"],
+                        row["source_id"],
+                        self.provider.name,
+                        self.provider.dimension,
+                        array("f", vector).tobytes(),
+                    )
+                )
+        with self.store.connection:
+            self.store.connection.executemany(
+                "INSERT INTO vector_chunks VALUES(?,?,?,?,?)", values
+            )
+        total = self.store.connection.execute(
+            "SELECT COUNT(*) FROM vector_chunks WHERE source_id=? AND provider=?",
+            (source_id, self.provider.name),
+        ).fetchone()[0]
+        return {
+            "embedded": len(values),
+            "reused": total - len(values),
+            "chunks": total,
+            "dimension": self.provider.dimension,
+        }
+
     def search(self, query: str, source_id: str, limit: int = 10) -> list[dict[str, object]]:
-        query_vector = self.provider.embed([query])[0]
+        query_vector = self.provider.embed_query(query)
         rows = self.store.connection.execute(
             "SELECT l.*,v.vector FROM vector_chunks v JOIN lexical_chunks l "
             "ON l.chunk_id=v.chunk_id WHERE v.provider=? AND v.source_id=?",

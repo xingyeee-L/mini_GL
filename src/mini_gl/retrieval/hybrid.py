@@ -23,11 +23,14 @@ class TokenOverlapReranker:
             text = f"{result['title']} {result['snippet']}"
             overlap = len(query_terms & set(tokenize(text))) / max(1, len(query_terms))
             result["rerank_score"] = round(overlap, 6)
+            result["final_score"] = round(
+                _number(result["fusion_score"]) + overlap * 0.001,
+                8,
+            )
         return sorted(
             results,
             key=lambda result: (
-                -_number(result["rerank_score"]),
-                -_number(result["fusion_score"]),
+                -_number(result["final_score"]),
                 str(result["chunk_id"]),
             ),
         )
@@ -49,11 +52,14 @@ class HybridSearchService:
         lexical_rows = cast(list[dict[str, object]], lexical_response["results"])
         vector_rows = self.vector.search(query, source_id, limit=50)
         fused: dict[str, dict[str, object]] = {}
-        for channel, rows in (("lexical", lexical_rows), ("vector", vector_rows)):
+        channels = (("lexical", lexical_rows, 1.0), ("vector", vector_rows, 2.0))
+        for channel, rows, weight in channels:
             for rank, result in enumerate(rows, 1):
                 chunk_id = str(result["chunk_id"])
                 item = fused.setdefault(chunk_id, dict(result))
-                item["fusion_score"] = _number(item.get("fusion_score", 0.0)) + 1 / (60 + rank)
+                item["fusion_score"] = (
+                    _number(item.get("fusion_score", 0.0)) + weight / (60 + rank)
+                )
                 item[f"{channel}_rank"] = rank
         results = list(fused.values())
         results.sort(

@@ -79,6 +79,53 @@ class LexicalSearchService:
         self.store = store
 
     def rebuild(self, source_id: str | None = None) -> dict[str, int]:
+        rows, document_count = self._build_rows(source_id)
+        with self.store.connection:
+            if source_id is None:
+                self.store.connection.execute("DELETE FROM lexical_chunks")
+            else:
+                self.store.connection.execute(
+                    "DELETE FROM lexical_chunks WHERE source_id=?", (source_id,)
+                )
+            self.store.connection.executemany(
+                "INSERT INTO lexical_chunks VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows
+            )
+        return {"documents": document_count, "chunks": len(rows)}
+
+    def sync(self, source_id: str) -> dict[str, int]:
+        """Update one source while retaining unchanged chunk IDs and their vectors."""
+        rows, document_count = self._build_rows(source_id)
+        current = {str(row[0]): row for row in rows}
+        existing = {
+            str(row["chunk_id"]): row
+            for row in self.store.connection.execute(
+                "SELECT * FROM lexical_chunks WHERE source_id=?", (source_id,)
+            )
+        }
+        deleted = existing.keys() - current.keys()
+        created = current.keys() - existing.keys()
+        unchanged = current.keys() & existing.keys()
+        with self.store.connection:
+            self.store.connection.executemany(
+                "DELETE FROM lexical_chunks WHERE chunk_id=?", ((item,) for item in deleted)
+            )
+            self.store.connection.executemany(
+                """INSERT INTO lexical_chunks VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(chunk_id) DO UPDATE SET
+                source_uri=excluded.source_uri,title=excluded.title,file_type=excluded.file_type,
+                updated_at=excluded.updated_at,content=excluded.content,
+                terms_json=excluded.terms_json,token_count=excluded.token_count""",
+                current.values(),
+            )
+        return {
+            "documents": document_count,
+            "created": len(created),
+            "unchanged": len(unchanged),
+            "deleted": len(deleted),
+            "chunks": len(rows),
+        }
+
+    def _build_rows(self, source_id: str | None) -> tuple[list[tuple[object, ...]], int]:
         if source_id is None:
             documents = self.store.connection.execute(
                 "SELECT document_id,source_id,source_uri,title,content,updated_at FROM documents"
@@ -112,17 +159,7 @@ class LexicalSearchService:
                         len(terms),
                     )
                 )
-        with self.store.connection:
-            if source_id is None:
-                self.store.connection.execute("DELETE FROM lexical_chunks")
-            else:
-                self.store.connection.execute(
-                    "DELETE FROM lexical_chunks WHERE source_id=?", (source_id,)
-                )
-            self.store.connection.executemany(
-                "INSERT INTO lexical_chunks VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows
-            )
-        return {"documents": len(documents), "chunks": len(rows)}
+        return rows, len(documents)
 
     def search(
         self,

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import json
+import os
 import statistics
 import sys
 import tempfile
@@ -10,7 +12,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
-from mini_gl.indexing.embeddings import SentenceTransformerEmbedding
+from mini_gl.indexing.embeddings import load_bge_provider, load_e5_provider
 from mini_gl.ingestion import IngestionService
 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
 from mini_gl.retrieval.lexical import LexicalSearchService
@@ -19,9 +21,14 @@ from mini_gl.storage.sqlite import SQLiteStore
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "tests" / "fixtures" / "synthetic" / "retrieval_benchmark.json"
-MODEL_PATH = ROOT / "models" / "bge-small-zh-v1.5"
-MODEL_ID = "BAAI/bge-small-zh-v1.5"
-MODEL_REVISION = "a7ec18349c42fc774b0e86af26215e38a10fbe9d"
+def peak_working_set_mb() -> float | None:
+    """Return the process peak working set using the optional benchmark dependency."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    peak = psutil.Process().memory_info().peak_wset if os.name == "nt" else None
+    return round(peak / 1024 / 1024, 2) if peak is not None else None
 
 
 def metrics(
@@ -58,10 +65,13 @@ def metrics(
 
 def main() -> None:
     sys.stdout.reconfigure(encoding="utf-8")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", choices=("bge", "e5"), default="bge")
+    args = parser.parse_args()
     benchmark = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    provider = SentenceTransformerEmbedding(
-        MODEL_PATH, model_id=MODEL_ID, revision=MODEL_REVISION
-    )
+    cold_started = time.perf_counter()
+    provider = load_e5_provider() if args.model == "e5" else load_bge_provider()
+    cold_start_ms = (time.perf_counter() - cold_started) * 1000
     with tempfile.TemporaryDirectory() as temp_dir:
         base = Path(temp_dir)
         allowed = base / "allowed"
@@ -88,7 +98,13 @@ def main() -> None:
             report = {
                 "model": provider.name,
                 "dimension": provider.dimension,
+                "cold_start_ms": round(cold_start_ms, 2),
                 "index_ms": round(index_ms, 2),
+                "index_bytes": store.connection.execute(
+                    "SELECT COALESCE(SUM(LENGTH(vector)),0) FROM vector_chunks WHERE provider=?",
+                    (provider.name,),
+                ).fetchone()[0],
+                "peak_working_set_mb": peak_working_set_mb(),
                 "vector": metrics(
                     cases, lambda query: vector.search(query, allowed_source.source_id)
                 ),

@@ -14,6 +14,9 @@ from mini_gl.retrieval.lexical import tokenize
 BGE_MODEL_ID = "BAAI/bge-small-zh-v1.5"
 BGE_MODEL_REVISION = "a7ec18349c42fc774b0e86af26215e38a10fbe9d"
 BGE_DEFAULT_PATH = Path("models/bge-small-zh-v1.5")
+E5_MODEL_ID = "intfloat/multilingual-e5-small"
+E5_MODEL_REVISION = "614241f622f53c4eeff9890bdc4f31cfecc418b3"
+E5_DEFAULT_PATH = Path("models/multilingual-e5-small")
 
 
 class EmbeddingProvider(Protocol):
@@ -21,6 +24,10 @@ class EmbeddingProvider(Protocol):
     dimension: int
 
     def embed(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]: ...
+
+    def embed_query(self, text: str) -> list[float]: ...
 
 
 class DeterministicLocalEmbedding:
@@ -36,6 +43,12 @@ class DeterministicLocalEmbedding:
     def embed(self, texts: list[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]
 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed(texts)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed([text])[0]
+
     def _embed_one(self, text: str) -> list[float]:
         vector = [0.0] * self.dimension
         for term in tokenize(text):
@@ -50,7 +63,15 @@ class DeterministicLocalEmbedding:
 class SentenceTransformerEmbedding:
     """Strictly local sentence-transformers provider for downloaded model weights."""
 
-    def __init__(self, model_path: Path, *, model_id: str, revision: str) -> None:
+    def __init__(
+        self,
+        model_path: Path,
+        *,
+        model_id: str,
+        revision: str,
+        query_prefix: str = "",
+        passage_prefix: str = "",
+    ) -> None:
         if not model_path.is_dir():
             raise FileNotFoundError(f"Local embedding model not found: {model_path}")
         os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -69,6 +90,8 @@ class SentenceTransformerEmbedding:
             raise ValueError("Model did not report an embedding dimension")
         self.dimension = dimension
         self.name = f"sentence-transformers:{model_id}@{revision}"
+        self.query_prefix = query_prefix
+        self.passage_prefix = passage_prefix
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         vectors: Any = self._model.encode(
@@ -80,8 +103,24 @@ class SentenceTransformerEmbedding:
         )
         return [[float(value) for value in row] for row in vectors]
 
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return self.embed([f"{self.passage_prefix}{text}" for text in texts])
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed([f"{self.query_prefix}{text}"])[0]
+
 
 def load_bge_provider(model_path: Path = BGE_DEFAULT_PATH) -> SentenceTransformerEmbedding:
     return SentenceTransformerEmbedding(
         model_path.resolve(), model_id=BGE_MODEL_ID, revision=BGE_MODEL_REVISION
+    )
+
+
+def load_e5_provider(model_path: Path = E5_DEFAULT_PATH) -> SentenceTransformerEmbedding:
+    return SentenceTransformerEmbedding(
+        model_path.resolve(),
+        model_id=E5_MODEL_ID,
+        revision=E5_MODEL_REVISION,
+        query_prefix="query: ",
+        passage_prefix="passage: ",
     )

@@ -6,7 +6,7 @@ import argparse
 import io
 import json
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from mini_gl.ingestion import IngestionService
@@ -40,19 +40,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     vector_index.add_argument("source_id")
     vector_index.add_argument(
-        "--provider", choices=("deterministic", "bge-small-zh"), default="deterministic"
+        "--provider",
+        choices=("deterministic", "bge-small-zh", "multilingual-e5"),
+        default="deterministic",
+    )
+    incremental = subparsers.add_parser(
+        "index-sync", help="Incrementally update lexical and local vector indexes"
+    )
+    incremental.add_argument("source_id")
+    incremental.add_argument(
+        "--provider",
+        choices=("deterministic", "bge-small-zh", "multilingual-e5"),
+        default="deterministic",
     )
     hybrid = subparsers.add_parser("hybrid-search", help="Run local lexical/vector fusion")
     hybrid.add_argument("source_id")
     hybrid.add_argument("query")
     hybrid.add_argument("--limit", type=int, default=10)
     hybrid.add_argument(
-        "--provider", choices=("deterministic", "bge-small-zh"), default="deterministic"
+        "--provider",
+        choices=("deterministic", "bge-small-zh", "multilingual-e5"),
+        default="deterministic",
     )
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
-    for command in (register, sync, status, index, search, vector_index, hybrid, serve):
+    commands = (register, sync, status, index, search, vector_index, incremental, hybrid, serve)
+    for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
     return parser
 
@@ -94,21 +108,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             else:
                 from mini_gl.indexing.embeddings import (
                     DeterministicLocalEmbedding,
+                    EmbeddingProvider,
                     load_bge_provider,
+                    load_e5_provider,
                 )
                 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
                 from mini_gl.retrieval.lexical import LexicalSearchService
                 from mini_gl.retrieval.vector import VectorSearchService
 
                 lexical = LexicalSearchService(store)
-                provider = (
-                    load_bge_provider()
-                    if args.provider == "bge-small-zh"
-                    else DeterministicLocalEmbedding()
-                )
+                providers: dict[str, Callable[[], EmbeddingProvider]] = {
+                    "bge-small-zh": load_bge_provider,
+                    "multilingual-e5": load_e5_provider,
+                    "deterministic": DeterministicLocalEmbedding,
+                }
+                provider = providers[args.provider]()
                 vector = VectorSearchService(store, provider)
                 if args.command == "vector-index":
                     print(json.dumps(vector.rebuild(args.source_id), sort_keys=True))
+                elif args.command == "index-sync":
+                    print(
+                        json.dumps(
+                            {
+                                "lexical": lexical.sync(args.source_id),
+                                "vector": vector.sync(args.source_id),
+                            },
+                            sort_keys=True,
+                        )
+                    )
                 else:
                     results = HybridSearchService(
                         lexical, vector, TokenOverlapReranker()

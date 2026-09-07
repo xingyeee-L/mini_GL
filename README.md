@@ -107,8 +107,14 @@ After downloading the pinned BGE weights to `models/bge-small-zh-v1.5`, select t
 
 ```powershell
 python -m mini_gl vector-index <source-id> --provider bge-small-zh
+python -m mini_gl index-sync <source-id> --provider bge-small-zh
 python -m mini_gl hybrid-search <source-id> "断电后如何恢复" --provider bge-small-zh
 ```
 
 The provider uses `local_files_only`, disables Hugging Face telemetry, and never falls back to a
 hosted inference API.
+
+`index-sync` preserves unchanged lexical chunks and vectors, embeds only new or changed chunks,
+and removes derived vectors for deleted source documents. The database can retain multiple pinned
+provider indexes side by side; BGE-small-zh-v1.5 is the phase-three default, while
+multilingual-e5-small remains an optional comparison provider.
