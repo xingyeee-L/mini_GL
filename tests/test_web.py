@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
 from mini_gl.storage.sqlite import SQLiteStore
 from mini_gl.web import make_server, resolve_document_path
@@ -27,6 +28,7 @@ class WebAcceptanceTests(unittest.TestCase):
             service.sync(source.source_id)
             self.source_id = source.source_id
         self.server = make_server(self.db, port=0)
+        self.server.embedding_provider = DeterministicLocalEmbedding(64)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
         self.base_url = f"http://127.0.0.1:{self.server.server_port}"
@@ -59,7 +61,7 @@ class WebAcceptanceTests(unittest.TestCase):
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             page = response.read().decode()
         self.assertIn("本地数据与搜索验收台", page)
-        self.assertIn("构建向量工程索引", page)
+        self.assertIn("构建 BGE 本地向量索引", page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)

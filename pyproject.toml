@@ -19,6 +19,10 @@ dev = [
   "pytest-cov>=6.0",
   "ruff>=0.11",
 ]
+ml = [
+  "sentence-transformers>=5.7,<6",
+  "torch>=2.14,<3",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mini_gl"]
@@ -40,4 +44,3 @@ select = ["E", "F", "I", "B", "UP", "S"]
 python_version = "3.11"
 strict = true
 packages = ["mini_gl"]
-

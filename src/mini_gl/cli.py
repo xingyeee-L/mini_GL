@@ -39,10 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
         "vector-index", help="Build the offline engineering vector index"
     )
     vector_index.add_argument("source_id")
+    vector_index.add_argument(
+        "--provider", choices=("deterministic", "bge-small-zh"), default="deterministic"
+    )
     hybrid = subparsers.add_parser("hybrid-search", help="Run local lexical/vector fusion")
     hybrid.add_argument("source_id")
     hybrid.add_argument("query")
     hybrid.add_argument("--limit", type=int, default=10)
+    hybrid.add_argument(
+        "--provider", choices=("deterministic", "bge-small-zh"), default="deterministic"
+    )
     serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
@@ -86,13 +92,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                     )
                     print(json.dumps(result, ensure_ascii=False, indent=2))
             else:
-                from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
+                from mini_gl.indexing.embeddings import (
+                    DeterministicLocalEmbedding,
+                    load_bge_provider,
+                )
                 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
                 from mini_gl.retrieval.lexical import LexicalSearchService
                 from mini_gl.retrieval.vector import VectorSearchService
 
                 lexical = LexicalSearchService(store)
-                vector = VectorSearchService(store, DeterministicLocalEmbedding())
+                provider = (
+                    load_bge_provider()
+                    if args.provider == "bge-small-zh"
+                    else DeterministicLocalEmbedding()
+                )
+                vector = VectorSearchService(store, provider)
                 if args.command == "vector-index":
                     print(json.dumps(vector.rebuild(args.source_id), sort_keys=True))
                 else:

@@ -102,3 +102,13 @@ for plumbing and privacy verification only; it is not presented as a semantic mo
 python -m mini_gl vector-index <source-id>
 python -m mini_gl hybrid-search <source-id> "断电后如何恢复"
 ```
+
+After downloading the pinned BGE weights to `models/bge-small-zh-v1.5`, select the real provider:
+
+```powershell
+python -m mini_gl vector-index <source-id> --provider bge-small-zh
+python -m mini_gl hybrid-search <source-id> "断电后如何恢复" --provider bge-small-zh
+```
+
+The provider uses `local_files_only`, disables Hugging Face telemetry, and never falls back to a
+hosted inference API.
