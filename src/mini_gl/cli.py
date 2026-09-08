@@ -101,6 +101,16 @@ def build_parser() -> argparse.ArgumentParser:
     restore = subparsers.add_parser("restore", help="Restore a snapshot to a new database path")
     restore.add_argument("backup", type=Path)
     restore.add_argument("destination", type=Path)
+    revoke = subparsers.add_parser(
+        "revoke", help="Remove a source registration and all derived application data"
+    )
+    revoke.add_argument("source_id")
+    revoke.add_argument("--confirm", required=True)
+    benchmark = subparsers.add_parser(
+        "benchmark-ingestion", help="Run a bounded synthetic ingestion benchmark"
+    )
+    benchmark.add_argument("--files", type=int, default=500)
+    benchmark.add_argument("--file-size", type=int, default=1024)
     commands = (
         register,
         sync,
@@ -115,6 +125,7 @@ def build_parser() -> argparse.ArgumentParser:
         chat_import,
         chat_convert,
         backup,
+        revoke,
     )
     for command in commands:
         command.add_argument("--db", type=Path, default=DEFAULT_DB)
@@ -151,6 +162,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             print(json.dumps(result, ensure_ascii=False, sort_keys=True))
             return 0
+        if args.command == "benchmark-ingestion":
+            from mini_gl.benchmark import run_ingestion_benchmark
+
+            print(
+                json.dumps(
+                    run_ingestion_benchmark(args.files, args.file_size),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 0
         with SQLiteStore(args.db) as store:
             service = IngestionService(store)
             if args.command == "chat-import":
@@ -172,6 +194,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(service.sync(args.source_id), sort_keys=True))
             elif args.command == "status":
                 print(json.dumps(store.status(args.source_id), ensure_ascii=False, indent=2))
+            elif args.command == "revoke":
+                if args.confirm != args.source_id[-8:]:
+                    raise ValueError("Confirmation must match the final 8 characters of source ID")
+                print(json.dumps(store.revoke_source(args.source_id), sort_keys=True))
             elif args.command in {"index", "search"}:
                 from mini_gl.retrieval.lexical import LexicalSearchService
 

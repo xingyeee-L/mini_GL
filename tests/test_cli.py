@@ -49,6 +49,31 @@ class CliTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertEqual(json.loads(restored_status)[0]["file_count"], 1)
 
+            original = (root / "hello.txt").read_bytes()
+            code, rejected = self._invoke(
+                "revoke", source_id, "--confirm", "wrong", "--db", str(restored)
+            )
+            self.assertEqual(code, 1)
+            self.assertIn("Confirmation", json.loads(rejected)["message"])
+            code, revoked = self._invoke(
+                "revoke", source_id, "--confirm", source_id[-8:], "--db", str(restored)
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(revoked)["documents"], 1)
+            self.assertEqual((root / "hello.txt").read_bytes(), original)
+            code, empty = self._invoke("status", "--db", str(restored))
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(empty), [])
+
+    def test_synthetic_benchmark_cli(self) -> None:
+        code, output = self._invoke(
+            "benchmark-ingestion", "--files", "10", "--file-size", "128"
+        )
+        self.assertEqual(code, 0)
+        payload = json.loads(output)
+        self.assertEqual(payload["files"], 10)
+        self.assertTrue(payload["source_unchanged"])
+
     def test_rejects_limits_above_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir) / "source"

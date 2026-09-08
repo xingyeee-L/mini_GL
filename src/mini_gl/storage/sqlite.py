@@ -319,6 +319,27 @@ class SQLiteStore:
             )
         return counts
 
+    def revoke_source(self, source_id: str) -> dict[str, int]:
+        """Remove a registration and all application-owned records through foreign-key cascades."""
+        self.get_source(source_id)
+        counts = {
+            "documents": self.connection.execute(
+                "SELECT COUNT(*) FROM documents WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+            "lexical_chunks": self.connection.execute(
+                "SELECT COUNT(*) FROM lexical_chunks WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+            "vector_chunks": self.connection.execute(
+                "SELECT COUNT(*) FROM vector_chunks WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+            "sync_runs": self.connection.execute(
+                "SELECT COUNT(*) FROM sync_runs WHERE source_id=?", (source_id,)
+            ).fetchone()[0],
+        }
+        with self.connection:
+            self.connection.execute("DELETE FROM sources WHERE source_id=?", (source_id,))
+        return counts
+
     def fail_run(self, run_id: str, error: Exception) -> None:
         message = str(error).replace("\n", " ")[:500]
         with self.connection:
