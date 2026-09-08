@@ -26,6 +26,10 @@ def build_parser() -> argparse.ArgumentParser:
     register.add_argument("--max-depth", type=int, default=DEFAULT_MAX_DEPTH)
     sync = subparsers.add_parser("sync", help="Synchronize one registered source")
     sync.add_argument("source_id")
+    resume = subparsers.add_parser(
+        "resume", help="Restart a failed or interrupted sync from the committed snapshot"
+    )
+    resume.add_argument("source_id")
     status = subparsers.add_parser("status", help="Show privacy-safe ingestion status")
     status.add_argument("source_id", nargs="?")
     index = subparsers.add_parser("index", help="Rebuild the local lexical index")
@@ -111,9 +115,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     benchmark.add_argument("--files", type=int, default=500)
     benchmark.add_argument("--file-size", type=int, default=1024)
+    soak = subparsers.add_parser(
+        "benchmark-soak", help="Run repeated synthetic synchronization and indexing"
+    )
+    soak.add_argument("--cycles", type=int, default=20)
+    soak.add_argument("--files", type=int, default=100)
     commands = (
         register,
         sync,
+        resume,
         status,
         index,
         search,
@@ -173,6 +183,17 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.command == "benchmark-soak":
+            from mini_gl.benchmark import run_soak_benchmark
+
+            print(
+                json.dumps(
+                    run_soak_benchmark(args.cycles, args.files),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 0
         with SQLiteStore(args.db) as store:
             service = IngestionService(store)
             if args.command == "chat-import":
@@ -192,6 +213,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps({"source_id": source.source_id, "root": str(source.root_path)}))
             elif args.command == "sync":
                 print(json.dumps(service.sync(args.source_id), sort_keys=True))
+            elif args.command == "resume":
+                print(json.dumps(service.resume(args.source_id), sort_keys=True))
             elif args.command == "status":
                 print(json.dumps(store.status(args.source_id), ensure_ascii=False, indent=2))
             elif args.command == "revoke":

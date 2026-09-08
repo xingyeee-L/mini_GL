@@ -1,0 +1,7 @@
+# Captured from the verified Windows Python 3.14 development environment on 2026-09-08.
+librt==0.15.0
+mypy==2.3.1
+mypy_extensions==1.1.0
+pathspec==1.1.1
+ruff==0.16.6
+typing_extensions==4.16.0

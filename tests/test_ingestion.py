@@ -118,6 +118,32 @@ class IngestionTests(unittest.TestCase):
             0,
         )
 
+    def test_fault_after_scan_rolls_back_and_resume_restarts_from_committed_snapshot(self) -> None:
+        note = self.root / "note.txt"
+        note.write_text("version one", encoding="utf-8")
+        source = self.service.register(self.root)
+        self.service.sync(source.source_id)
+        note.write_text("version two", encoding="utf-8")
+        (self.root / "added.txt").write_text("new", encoding="utf-8")
+
+        def interrupt() -> None:
+            raise RuntimeError("deterministic injected interruption")
+
+        with self.assertRaisesRegex(RuntimeError, "injected interruption"):
+            self.service.sync(source.source_id, after_scan=interrupt)
+        row = self.store.connection.execute(
+            "SELECT content FROM documents WHERE source_id=? AND title='note.txt'",
+            (source.source_id,),
+        ).fetchone()
+        self.assertEqual(row["content"], "version one")
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
+
+        resumed = self.service.resume(source.source_id)
+        self.assertEqual(resumed["updated"], 1)
+        self.assertEqual(resumed["created"], 1)
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 2)
+        self.assertIsNotNone(resumed["resumed_from_run_id"])
+
     def test_duplicate_event_application_is_idempotent(self) -> None:
         source = self.service.register(self.root)
         run_id = self.store.start_run(source.source_id)

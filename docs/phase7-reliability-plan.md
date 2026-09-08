@@ -42,6 +42,22 @@ A separate boundary run processed one 10 MiB synthetic text file in 4,231 ms wal
 allocations, and created a 31.527 MiB database. Its source digest also remained unchanged. The
 generator rejects configurations above 5,000 files, 10 MiB per file, or 64 MiB total.
 
+The bounded soak run completed 50 synchronization/index cycles over 100 synthetic files. Sync and
+incremental-index P50 was 255.544 ms and P95 was 325.516 ms; Python-tracked peak allocations were
+0.383 MiB and the final database was 3.188 MiB with 5,100 idempotent lifecycle events. SQLite
+integrity remained `ok`, and the source digest remained unchanged.
+
+## Consolidated resource baseline
+
+- Ingestion CPU, wall time, Python allocations, and disk growth are captured above.
+- BGE-small-zh remains the default embedding model based on the phase-three benchmark: about
+  578 MiB peak memory and 12.06 ms P50 on this laptop.
+- Qwen3 4B Q4_K_M remains the generation model based on the phase-four benchmark: approximately
+  3.2 GB runtime footprint on the RTX 3060 Laptop GPU, with 319 ms end-to-end P50 and 895 ms P95
+  on the fixed eight-question synthetic set.
+- Figures are local baselines, not capacity guarantees. Native Torch/CUDA allocations are not
+  included in Python `tracemalloc` figures.
+
 ## Remaining phase work
 
 - Establish large-file and large-directory ingestion limits and latency/resource baselines. A
@@ -56,3 +72,13 @@ generator rejects configurations above 5,000 files, 10 MiB per file, or 64 MiB t
 - Lock dependencies and perform a supply-chain review.
 - Audit every log and error path for content, query, credential, and endpoint leakage.
 - Add deterministic fault injection and a bounded long-running soak test.
+
+The `resume` command now restarts a FAILED or ABORTED synchronization from the last committed
+snapshot. A deterministic post-scan/pre-commit interruption proves that the prior document state
+remains visible until the resumed transaction succeeds. `benchmark-soak` repeats unchanged sync
+and incremental lexical indexing for 1–100 bounded cycles and checks database integrity, event
+state, memory, database growth, latency, and source preservation.
+
+Development and optional ML environments are now captured with exact-version lock files. The
+supply-chain and privacy-output review is recorded in
+`docs/phase7-supply-chain-and-logging-review.md`, including the remaining lack of wheel hashes.

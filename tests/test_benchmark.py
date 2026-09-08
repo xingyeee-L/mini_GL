@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from mini_gl.benchmark import run_ingestion_benchmark
+from mini_gl.benchmark import run_ingestion_benchmark, run_soak_benchmark
 
 
 class SyntheticBenchmarkTests(unittest.TestCase):
@@ -26,3 +26,15 @@ class SyntheticBenchmarkTests(unittest.TestCase):
         ):
             with self.subTest(files=files, size=size), self.assertRaises(ValueError):
                 run_ingestion_benchmark(files, size)
+
+    def test_short_soak_keeps_integrity_and_sources(self) -> None:
+        result = run_soak_benchmark(cycles=3, file_count=10)
+        self.assertEqual(result["integrity"], "ok")
+        self.assertEqual(result["cycles"], 3)
+        self.assertTrue(result["source_unchanged"])
+        self.assertGreater(result["events"], 0)
+
+    def test_soak_rejects_unbounded_requests(self) -> None:
+        for cycles, files in ((0, 1), (101, 1), (1, 0), (1, 501)):
+            with self.subTest(cycles=cycles, files=files), self.assertRaises(ValueError):
+                run_soak_benchmark(cycles, files)

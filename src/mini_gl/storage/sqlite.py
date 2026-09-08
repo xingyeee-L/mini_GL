@@ -286,6 +286,15 @@ class SQLiteStore:
             )
         return run_id
 
+    def latest_recoverable_run(self, source_id: str) -> str | None:
+        self.get_source(source_id)
+        row = self.connection.execute(
+            "SELECT run_id FROM sync_runs WHERE source_id=? AND status IN ('FAILED','ABORTED') "
+            "ORDER BY started_at DESC LIMIT 1",
+            (source_id,),
+        ).fetchone()
+        return str(row["run_id"]) if row is not None else None
+
     def set_source_paused(self, source_id: str, paused: bool) -> RegisteredSource:
         self.get_source(source_id)
         with self.connection:
