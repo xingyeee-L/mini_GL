@@ -23,3 +23,12 @@ Each decision has a deterministic event ID derived from idempotency key, action,
 SQLite stores only those identifiers, decision, risk, reason code, and timestamp. Repeated requests
 are deduplicated. Prompts, queries, document/chat content, credentials, and model output are not
 accepted by the audit API or represented in its schema.
+
+## Metadata-only workflow slice
+
+Write-like decisions can now enter a workflow ledger, but no real executor is connected. The only
+legal transitions are confirmation-required → ready → simulating → succeeded/failed, and failed →
+compensated. Invalid state jumps fail closed. Confirmation tickets are random, stored only as a
+SHA-256 digest, bound to one idempotent workflow, expire within at most 15 minutes, and cannot be
+replayed after confirmation. Failure and compensation details are restricted to short status codes
+so content cannot leak into the ledger.

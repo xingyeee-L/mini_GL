@@ -55,7 +55,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 6:
+        if version > 7:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -218,6 +218,29 @@ class SQLiteStore:
                     UNIQUE(idempotency_key, action, source_id)
                 );
                 PRAGMA user_version = 6;
+                """
+            )
+            self.connection.commit()
+            version = 6
+        if version == 6:
+            self.connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS agent_action_workflows (
+                    workflow_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    confirmation_hash TEXT,
+                    confirmation_expires_at TEXT,
+                    failure_code TEXT,
+                    compensation_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(idempotency_key, action, source_id)
+                );
+                PRAGMA user_version = 7;
                 """
             )
             self.connection.commit()
