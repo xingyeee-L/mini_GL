@@ -55,7 +55,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 5:
+        if version > 6:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -202,6 +202,53 @@ class SQLiteStore:
                 )
             self.connection.execute("PRAGMA user_version = 5")
             self.connection.commit()
+            version = 5
+        if version == 5:
+            self.connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS agent_action_audit (
+                    event_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT,
+                    action TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    decision TEXT NOT NULL,
+                    risk TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(idempotency_key, action, source_id)
+                );
+                PRAGMA user_version = 6;
+                """
+            )
+            self.connection.commit()
+
+    def record_agent_decision(
+        self,
+        *,
+        event_id: str,
+        idempotency_key: str | None,
+        action: str,
+        source_id: str,
+        decision: str,
+        risk: str,
+        reason_code: str,
+    ) -> bool:
+        """Persist metadata-only policy evidence; never accepts prompts or document content."""
+        with self.connection:
+            cursor = self.connection.execute(
+                "INSERT OR IGNORE INTO agent_action_audit VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    idempotency_key,
+                    action,
+                    source_id,
+                    decision,
+                    risk,
+                    reason_code,
+                    utc_now(),
+                ),
+            )
+        return cursor.rowcount == 1
 
     def recover_interrupted_runs(self) -> int:
         with self.connection:
