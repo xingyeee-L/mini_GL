@@ -55,7 +55,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 7:
+        if version > 8:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -244,6 +244,60 @@ class SQLiteStore:
                 """
             )
             self.connection.commit()
+            version = 7
+        if version == 7:
+            self.connection.execute("PRAGMA foreign_keys = OFF")
+            self.connection.executescript(
+                """
+                CREATE TABLE agent_action_audit_v8 (
+                    event_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT,
+                    action TEXT NOT NULL,
+                    source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+                    decision TEXT NOT NULL
+                        CHECK(decision IN ('allow','require_confirmation','deny')),
+                    risk TEXT NOT NULL CHECK(risk IN ('read_only','reversible','destructive')),
+                    reason_code TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+                INSERT INTO agent_action_audit_v8
+                    SELECT a.event_id,a.idempotency_key,a.action,a.source_id,a.decision,a.risk,
+                           a.reason_code,a.created_at
+                    FROM agent_action_audit a JOIN sources s ON s.source_id=a.source_id;
+                DROP TABLE agent_action_audit;
+                ALTER TABLE agent_action_audit_v8 RENAME TO agent_action_audit;
+                CREATE INDEX agent_action_audit_operation_idx
+                    ON agent_action_audit(idempotency_key,action,source_id);
+
+                CREATE TABLE agent_action_workflows_v8 (
+                    workflow_id TEXT PRIMARY KEY,
+                    idempotency_key TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+                    risk TEXT NOT NULL CHECK(risk IN ('reversible','destructive')),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'awaiting_confirmation','ready','simulating','succeeded','failed','compensated'
+                    )),
+                    confirmation_hash TEXT,
+                    confirmation_expires_at TEXT,
+                    failure_code TEXT,
+                    compensation_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    UNIQUE(idempotency_key, action, source_id)
+                );
+                INSERT INTO agent_action_workflows_v8
+                    SELECT w.workflow_id,w.idempotency_key,w.action,w.source_id,w.risk,w.state,
+                           w.confirmation_hash,w.confirmation_expires_at,w.failure_code,
+                           w.compensation_code,w.created_at,w.updated_at
+                    FROM agent_action_workflows w JOIN sources s ON s.source_id=w.source_id;
+                DROP TABLE agent_action_workflows;
+                ALTER TABLE agent_action_workflows_v8 RENAME TO agent_action_workflows;
+                PRAGMA user_version = 8;
+                """
+            )
+            self.connection.commit()
+            self.connection.execute("PRAGMA foreign_keys = ON")
 
     def record_agent_decision(
         self,
@@ -257,6 +311,7 @@ class SQLiteStore:
         reason_code: str,
     ) -> bool:
         """Persist metadata-only policy evidence; never accepts prompts or document content."""
+        self.get_source(source_id)
         with self.connection:
             cursor = self.connection.execute(
                 "INSERT OR IGNORE INTO agent_action_audit VALUES(?,?,?,?,?,?,?,?)",

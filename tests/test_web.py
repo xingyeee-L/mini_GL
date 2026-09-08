@@ -66,6 +66,8 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("运行与隐私状态", page)
         self.assertIn("真实 QQ/微信数据尚未开放", page)
         self.assertIn("构建 BGE 本地向量索引", page)
+        self.assertIn("Agent 安全控制中心", page)
+        self.assertIn("写入动作保持锁定", page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)
@@ -122,6 +124,12 @@ class WebAcceptanceTests(unittest.TestCase):
             f"/api/hybrid-search?source_id={self.source_id}&q=secret%20body"
         )
         self.assertEqual(result["results"][0]["title"], "visible-name.txt")
+        with SQLiteStore(self.db) as store:
+            audit = store.connection.execute(
+                "SELECT action,decision FROM agent_action_audit WHERE source_id=?",
+                (self.source_id,),
+            ).fetchall()
+            self.assertIn(("search", "allow"), [(row[0], row[1]) for row in audit])
 
     def test_visual_grounded_answer_flow(self) -> None:
         body = {"source_id": self.source_id}

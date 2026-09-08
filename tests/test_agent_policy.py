@@ -39,10 +39,9 @@ class AgentPolicyTests(unittest.TestCase):
         self.assertEqual(reversible.status, DecisionStatus.ALLOW)
         destructive = engine.evaluate(self._request(Action.REVOKE_SOURCE, key=key))
         self.assertEqual(destructive.status, DecisionStatus.REQUIRE_CONFIRMATION)
-        confirmed = engine.evaluate(
-            self._request(Action.REVOKE_SOURCE, key=key, confirmed=True)
-        )
-        self.assertEqual(confirmed.status, DecisionStatus.ALLOW)
+        repeated = engine.evaluate(self._request(Action.REVOKE_SOURCE, key=key))
+        self.assertEqual(repeated.status, DecisionStatus.REQUIRE_CONFIRMATION)
+        self.assertTrue(engine.verify(repeated))
 
     def test_repeated_decision_has_one_metadata_only_audit_event(self) -> None:
         key = str(uuid.uuid4())
@@ -50,6 +49,12 @@ class AgentPolicyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir, SQLiteStore(
             Path(temp_dir) / "state.sqlite3"
         ) as store:
+            root = Path(temp_dir) / "source"
+            root.mkdir()
+            source = store.register_source(root, 1024, 2, frozenset({".txt"}))
+            decision = PolicyEngine().evaluate(
+                self._request(Action.PAUSE_SOURCE, key=key, source_id=source.source_id)
+            )
             values = asdict(decision)
             payload = {
                 "event_id": values["event_id"],
@@ -75,15 +80,14 @@ class AgentPolicyTests(unittest.TestCase):
 
     @staticmethod
     def _request(
-        action: Action, *, key: str | None = None, confirmed: bool = False
+        action: Action, *, key: str | None = None, source_id: str = "source-1"
     ) -> ActionRequest:
         return ActionRequest(
             action=action,
-            source_id="source-1",
+            source_id=source_id,
             user_permissions=ALL,
             agent_permissions=ALL,
             tool_permissions=ALL,
             policy_permissions=ALL,
             idempotency_key=key,
-            human_confirmation=confirmed,
         )

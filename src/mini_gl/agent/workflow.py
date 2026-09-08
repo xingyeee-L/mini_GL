@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
-from mini_gl.agent.policy import Decision, DecisionStatus, RiskLevel
+from mini_gl.agent.policy import RISK_BY_ACTION, Decision, DecisionStatus, PolicyEngine, RiskLevel
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -38,17 +38,35 @@ class ActionWorkflow:
     def __init__(
         self,
         store: SQLiteStore,
+        policy: PolicyEngine,
         *,
         now: Callable[[], datetime] | None = None,
         token_factory: Callable[[], str] | None = None,
     ) -> None:
         self.store = store
+        self.policy = policy
         self.now = now or (lambda: datetime.now(UTC))
         self.token_factory = token_factory or (lambda: secrets.token_urlsafe(32))
+        with self.store.connection:
+            self.store.connection.execute(
+                "UPDATE agent_action_workflows SET state=?,failure_code=?,updated_at=? "
+                "WHERE state=?",
+                (
+                    WorkflowState.FAILED.value,
+                    "INTERRUPTED_SIMULATION",
+                    self.now().isoformat(),
+                    WorkflowState.SIMULATING.value,
+                ),
+            )
 
     def prepare(self, decision: Decision, *, ttl_seconds: int = 300) -> PreparedWorkflow:
         if decision.status is DecisionStatus.DENY:
             raise ValueError("Denied decisions cannot create workflows")
+        if not self.policy.verify(decision):
+            raise ValueError("Decision authorization proof is invalid")
+        if RISK_BY_ACTION[decision.action] is not decision.risk:
+            raise ValueError("Decision risk does not match the fixed action policy")
+        self.store.get_source(decision.source_id)
         if decision.risk is RiskLevel.READ_ONLY or decision.idempotency_key is None:
             raise ValueError("Only keyed write-like decisions use the action workflow")
         if not 1 <= ttl_seconds <= 900:
@@ -96,13 +114,24 @@ class ActionWorkflow:
         if row["state"] != WorkflowState.AWAITING_CONFIRMATION.value:
             raise RuntimeError("Workflow is not awaiting confirmation")
         expiry = datetime.fromisoformat(row["confirmation_expires_at"])
-        if self.now() > expiry:
+        if self.now() >= expiry:
             raise RuntimeError("Confirmation ticket expired")
         if not hmac.compare_digest(row["confirmation_hash"], _hash_token(token)):
             raise RuntimeError("Confirmation ticket is invalid")
-        return self._transition(
-            workflow_id, WorkflowState.AWAITING_CONFIRMATION, WorkflowState.READY
-        )
+        with self.store.connection:
+            cursor = self.store.connection.execute(
+                "UPDATE agent_action_workflows SET state=?,confirmation_hash=NULL,"
+                "confirmation_expires_at=NULL,updated_at=? WHERE workflow_id=? AND state=?",
+                (
+                    WorkflowState.READY.value,
+                    self.now().isoformat(),
+                    workflow_id,
+                    WorkflowState.AWAITING_CONFIRMATION.value,
+                ),
+            )
+        if cursor.rowcount != 1:
+            raise RuntimeError("Invalid workflow transition")
+        return WorkflowState.READY
 
     def start_simulation(self, workflow_id: str) -> WorkflowState:
         return self._transition(workflow_id, WorkflowState.READY, WorkflowState.SIMULATING)

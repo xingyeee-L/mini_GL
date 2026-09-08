@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
+import secrets
 import uuid
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,7 +54,6 @@ class ActionRequest:
     tool_permissions: frozenset[Action]
     policy_permissions: frozenset[Action]
     idempotency_key: str | None = None
-    human_confirmation: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,10 +65,14 @@ class Decision:
     risk: RiskLevel
     reason_code: str
     idempotency_key: str | None
+    authorization_tag: str
 
 
 class PolicyEngine:
     """Fail-closed intersection policy; it does not execute tools or parse retrieved content."""
+
+    def __init__(self, authorization_key: bytes | None = None) -> None:
+        self._authorization_key = authorization_key or secrets.token_bytes(32)
 
     def evaluate(self, request: ActionRequest) -> Decision:
         risk = RISK_BY_ACTION[request.action]
@@ -83,29 +88,47 @@ class PolicyEngine:
             request.idempotency_key
         ):
             return self._decision(request, DecisionStatus.DENY, risk, "idempotency_key_required")
-        if risk is RiskLevel.DESTRUCTIVE and not request.human_confirmation:
+        if risk is RiskLevel.DESTRUCTIVE:
             return self._decision(
                 request, DecisionStatus.REQUIRE_CONFIRMATION, risk, "human_confirmation_required"
             )
         return self._decision(request, DecisionStatus.ALLOW, risk, "authorized")
 
-    @staticmethod
     def _decision(
+        self,
         request: ActionRequest,
         status: DecisionStatus,
         risk: RiskLevel,
         reason_code: str,
     ) -> Decision:
         stable_key = request.idempotency_key or "read-only"
-        payload = f"{stable_key}\0{request.action}\0{request.source_id}"
+        operation = f"{stable_key}\0{request.action}\0{request.source_id}"
+        payload = f"{operation}\0{status}\0{risk}\0{reason_code}"
+        event_id = hashlib.sha256(payload.encode()).hexdigest()
+        tag = hmac.new(self._authorization_key, payload.encode(), hashlib.sha256).hexdigest()
         return Decision(
-            event_id=hashlib.sha256(payload.encode()).hexdigest(),
+            event_id=event_id,
             action=request.action,
             source_id=request.source_id,
             status=status,
             risk=risk,
             reason_code=reason_code,
             idempotency_key=request.idempotency_key,
+            authorization_tag=tag,
+        )
+
+    def verify(self, decision: Decision) -> bool:
+        stable_key = decision.idempotency_key or "read-only"
+        payload = (
+            f"{stable_key}\0{decision.action}\0{decision.source_id}\0{decision.status}"
+            f"\0{decision.risk}\0{decision.reason_code}"
+        )
+        expected_event = hashlib.sha256(payload.encode()).hexdigest()
+        expected_tag = hmac.new(
+            self._authorization_key, payload.encode(), hashlib.sha256
+        ).hexdigest()
+        return hmac.compare_digest(decision.event_id, expected_event) and hmac.compare_digest(
+            decision.authorization_tag, expected_tag
         )
 
 
