@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="mini-gl-token" content="__TOKEN__">
+  <title>mini_GL · 本地知识工作台</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="#home" aria-label="mini_GL 首页">
+        <span class="brand-mark">m</span><span>mini_GL</span>
+      </a>
+      <nav class="nav" aria-label="主导航">
+        <button class="nav-item active" data-view-target="home"><span>⌂</span>首页</button>
+        <button class="nav-item" data-view-target="search"><span>⌕</span>搜索</button>
+        <button class="nav-item" data-view-target="ask"><span>✦</span>智能问答</button>
+        <button class="nav-item" data-view-target="library"><span>▤</span>知识库</button>
+        <button class="nav-item" data-view-target="console"><span>⚙</span>控制台</button>
+      </nav>
+      <div class="sidebar-status">
+        <div class="status-line"><span class="status-dot"></span><strong>本地安全模式</strong></div>
+        <p>数据与模型仅在这台电脑上运行。</p>
+        <button class="text-button" data-view-target="console">查看运行状态 →</button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="mobile-menu" id="mobile-menu" aria-label="打开导航">☰</button>
+        <div><strong id="view-title">首页</strong><span class="breadcrumb">个人知识工作台</span></div>
+        <div class="top-actions">
+          <button class="command-button" id="command-open">⌕ 快速搜索 <kbd>Ctrl K</kbd></button>
+          <span class="privacy-pill"><span class="status-dot"></span>仅本机</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="view active" data-view="home">
+          <div class="home-hero">
+            <div class="hero-copy">
+              <span class="eyebrow">LOCAL INTELLIGENCE</span>
+              <h1>今天想从你的知识库中<br>了解什么？</h1>
+              <p>搜索散落在本地文件中的信息，或让本地 AI 根据可靠来源给出答案。</p>
+            </div>
+            <form class="universal-search" id="home-search-form">
+              <span class="search-icon">⌕</span>
+              <input name="query" maxlength="500" required placeholder="搜索知识，或直接向本地 AI 提问…" autocomplete="off">
+              <select name="intent" aria-label="搜索方式">
+                <option value="search">搜索</option>
+                <option value="ask">AI 提问</option>
+              </select>
+              <button class="primary" type="submit">开始</button>
+            </form>
+            <div class="suggestions">
+              <span>试着问：</span>
+              <button data-suggestion="这个项目如何保护原始文件？">如何保护原始文件？</button>
+              <button data-suggestion="阶段八完成了哪些能力？">阶段八完成了什么？</button>
+              <button data-suggestion="索引失败后如何恢复？">索引失败后如何恢复？</button>
+            </div>
+          </div>
+
+          <div class="section-heading"><div><span class="eyebrow dark">WORKSPACE</span><h2>你的知识空间</h2></div><button class="secondary" data-view-target="library">管理知识库</button></div>
+          <div class="overview-grid">
+            <article class="feature-card accent-blue"><span class="feature-icon">⌕</span><div><strong>统一搜索</strong><p>关键词与中文语义混合检索</p></div><button data-view-target="search">开始搜索 →</button></article>
+            <article class="feature-card accent-purple"><span class="feature-icon">✦</span><div><strong>有据可查的回答</strong><p>本地 Qwen 回答，每项事实带来源</p></div><button data-view-target="ask">向知识库提问 →</button></article>
+            <article class="feature-card accent-green"><span class="feature-icon">▤</span><div><strong id="home-source-count">0 个数据源</strong><p id="home-document-count">正在读取本地资料状态…</p></div><button data-view-target="library">查看资料 →</button></article>
+          </div>
+
+          <div class="two-column">
+            <section class="surface">
+              <div class="section-heading compact"><div><h2>最近的数据源</h2><p>查看同步与索引是否正常</p></div></div>
+              <div id="recent-sources" class="source-list skeleton-list"></div>
+            </section>
+            <section class="surface safety-card">
+              <span class="eyebrow">PRIVACY FIRST</span>
+              <h2>你的资料，不需要离开电脑。</h2>
+              <p>本地模型、本地数据库、回环网络；原文件始终只读，系统不会静默回退到云端。</p>
+              <div class="safety-row"><span>✓</span>授权路径之外零读取</div>
+              <div class="safety-row"><span>✓</span>回答有来源或明确拒答</div>
+              <div class="safety-row"><span>✓</span>Agent 写入动作保持锁定</div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view" data-view="search">
+          <div class="page-intro"><span class="eyebrow dark">SEARCH</span><h1>搜索全部本地知识</h1><p>关键词适合精确查找，BGE 混合检索更擅长理解中文语义。</p></div>
+          <section class="surface search-surface">
+            <form id="search-form" class="search-form">
+              <div class="large-input"><span>⌕</span><input name="query" required placeholder="输入文件名、关键词或你记得的一句话"></div>
+              <select id="search-source" name="source_id" aria-label="搜索数据源"></select>
+              <select name="mode" aria-label="检索方式"><option value="lexical">关键词 BM25</option><option value="hybrid">BGE 混合检索</option></select>
+              <select name="file_type" aria-label="文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select>
+              <button class="primary">搜索</button>
+            </form>
+            <div class="result-header"><p id="search-status" aria-live="polite">选择一个数据源，开始搜索。</p><span id="search-mode-note">结果不会跨越所选数据源权限。</span></div>
+            <div id="results" class="results empty-state"><span>⌕</span><strong>还没有搜索结果</strong><p>输入关键词，查找文件和相关片段。</p></div>
+          </section>
+        </section>
+
+        <section class="view" data-view="ask">
+          <div class="page-intro"><span class="eyebrow dark">LOCAL ASSISTANT</span><h1>向你的知识库提问</h1><p>回答仅使用已授权资料，并将证据与生成内容分开呈现。</p></div>
+          <div class="ask-layout">
+            <section class="conversation surface">
+              <div id="conversation-empty" class="conversation-empty"><span class="assistant-orb">✦</span><h2>我可以帮你梳理本地资料</h2><p>试着询问项目决策、会议结论、安全规则或某项工作的进展。</p></div>
+              <div id="answer-wrap" class="answer-wrap" hidden><div class="question-bubble" id="question-display"></div><div class="assistant-answer"><span class="assistant-orb small">✦</span><div><div id="answer" class="answer"></div><div id="answer-meta" class="answer-meta"></div></div></div></div>
+              <form id="ask-form" class="ask-composer">
+                <textarea name="question" required maxlength="500" rows="2" placeholder="例如：这个项目如何保护原始文件？"></textarea>
+                <div><select id="ask-source" name="source_id" aria-label="问答数据源"></select><select name="file_type" aria-label="限定文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select><button class="primary">发送 ↑</button></div>
+              </form>
+              <p id="ask-status" class="inline-status" aria-live="polite">本地 Qwen · 每个事实必须通过来源校验</p>
+            </section>
+            <aside class="evidence-panel surface"><div class="section-heading compact"><div><h2>证据与来源</h2><p>点击来源可查看授权快照</p></div></div><div id="citations" class="citations empty-evidence">回答后，相关来源会显示在这里。</div></aside>
+          </div>
+        </section>
+
+        <section class="view" data-view="library">
+          <div class="page-intro row-between"><div><span class="eyebrow dark">LIBRARY</span><h1>本地知识库</h1><p>了解系统已经连接了什么、什么时候同步、索引是否就绪。</p></div><button class="primary" data-view-target="console" data-console-tab="sources">＋ 添加数据源</button></div>
+          <div class="library-summary"><div><span>数据源</span><strong id="library-source-count">0</strong></div><div><span>文件快照</span><strong id="library-file-count">0</strong></div><div><span>关键词片段</span><strong id="library-lexical-count">0</strong></div><div><span>向量片段</span><strong id="library-vector-count">0</strong></div></div>
+          <div id="library-grid" class="library-grid"></div>
+        </section>
+
+        <section class="view" data-view="console">
+          <div class="page-intro"><span class="eyebrow dark">CONTROL CENTER</span><h1>系统控制台</h1><p>管理数据、模型与安全状态。普通搜索和问答无需进入这里。</p></div>
+          <div class="console-tabs" role="tablist"><button class="active" data-console-target="overview">系统总览</button><button data-console-target="sources">数据与索引</button><button data-console-target="models">模型中心</button><button data-console-target="security">Agent 安全</button><button data-console-target="acceptance">验收中心</button></div>
+
+          <section class="console-panel active" data-console="overview">
+            <div class="privacy-grid"><div><span class="status-dot"></span><strong>仅本机访问</strong><p id="network-state">127.0.0.1</p></div><div><span class="status-dot"></span><strong>本地向量模型</strong><p id="embedding-state">BGE-small-zh</p></div><div><span class="status-dot"></span><strong>本地回答模型</strong><p id="model-state">正在检查…</p></div><div><span class="status-dot"></span><strong>原始资料</strong><p>只读，不移动、不删除</p></div></div>
+            <div class="notice">真实 QQ/微信数据尚未开放；当前聊天适配器只用于虚构合成格式。</div>
+          </section>
+
+          <section class="console-panel" data-console="sources">
+            <div class="console-grid">
+              <section class="surface"><h2>添加数据源</h2><form id="register" class="stack-form"><label>TXT/Markdown 资料目录<input name="root" required placeholder="C:\path\to\test-files"></label><button class="primary">注册目录</button></form><div class="divider"><span>或</span></div><form id="chat-import" class="stack-form"><label>中立聊天 JSON 绝对路径<input name="path" required placeholder="C:\path\to\neutral-chat.json"></label><label class="check"><input name="authorized" type="checkbox" required>我确认自己有权使用这份导出文件</label><button class="secondary">只读导入聊天记录</button></form><p id="chat-status" class="inline-status">不读取或解密聊天客户端数据库。</p></section>
+              <section class="surface"><h2>同步与索引</h2><label>当前数据源<select id="sources"></select></label><div class="action-grid"><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="vector-index">构建 BGE 本地向量索引</button><button id="pause">暂停数据源</button><button class="danger-ghost" id="delete-derived">删除派生数据</button><button id="refresh">刷新状态</button></div><p id="message" class="inline-status" aria-live="polite">正在读取本地状态…</p></section>
+            </div>
+            <section class="surface"><div class="section-heading compact"><div><h2>最近一次同步</h2><p>正文不会显示在控制台列表中</p></div></div><div class="metrics"><div><span>新增</span><strong id="created">0</strong></div><div><span>更新</span><strong id="updated">0</strong></div><div><span>未变化</span><strong id="unchanged">0</strong></div><div><span>删除</span><strong id="deleted">0</strong></div></div><div class="table-wrap"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>
+          </section>
+
+          <section class="console-panel" data-console="models"><div class="model-grid"><article class="surface model-card"><span class="model-badge">EMBEDDING</span><h2>BGE-small-zh-v1.5</h2><p>中文语义向量模型，通过本地 models 目录离线加载。</p><div class="model-status"><span class="status-dot"></span>本地可用</div></article><article class="surface model-card"><span class="model-badge purple">CHAT MODEL</span><h2>Qwen3 4B</h2><p>通过本机 Ollama 回环接口生成可追溯回答。</p><div class="model-status"><span class="status-dot"></span>无云端回退</div></article><article class="surface model-card"><span class="model-badge neutral">RERANKER</span><h2>Token Overlap</h2><p>融合关键词与向量排序，保持组件可替换。</p><div class="model-status"><span class="status-dot"></span>本地运行</div></article></div></section>
+
+          <section class="console-panel" data-console="security"><div class="security-hero surface"><div><span class="eyebrow dark">PHASE 8</span><h2>受控 Agent，只开放可解释的只读能力。</h2><p>搜索、回答与来源预览在服务端重新验证四方权限；检索内容不能成为授权来源。</p></div><span class="security-score">只读<br><strong>ON</strong></span></div><div class="guard-grid"><div class="guard-card"><strong>● 只读执行门已启用</strong><p>用户、Agent、工具、策略必须同时允许。</p></div><div class="guard-card locked"><strong>🔒 写入动作保持锁定</strong><p>删除、撤销、Shell、任意路径与网络不开放。</p></div><div class="guard-card"><strong>✓ 防提示注入</strong><p>文档内容永远被视为不可信数据。</p></div><div class="guard-card"><strong>✓ 可恢复状态机</strong><p>确认票据一次性使用，中断时失败关闭。</p></div></div></section>
+
+          <section class="console-panel" data-console="acceptance"><div class="acceptance-grid"><div class="acceptance-score"><strong>74 / 74</strong><span>自动测试通过</span></div><div class="acceptance-score"><strong>8 / 8</strong><span>合成 RAG 问题通过</span></div><div class="acceptance-score"><strong>0</strong><span>越权事实</span></div><div class="acceptance-score"><strong>319 ms</strong><span>回答 P50</span></div></div><div class="phase-list surface"><div><span>阶段 0–2</span><strong>工程骨架、只读接入、关键词检索</strong><b>已完成</b></div><div><span>阶段 3–4</span><strong>混合检索、本地 RAG</strong><b>已完成</b></div><div><span>阶段 5–6</span><strong>聊天标准导入、本地界面</strong><b>已完成</b></div><div><span>阶段 7–8</span><strong>稳定恢复、受控 Agent</strong><b>已完成</b></div></div></section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="source-preview"><div class="dialog-head"><div><span class="eyebrow dark">SOURCE</span><h2 id="preview-title">来源详情</h2></div><button id="preview-close" aria-label="关闭来源预览">×</button></div><div class="dialog-body"><div id="preview-meta" class="preview-meta"></div><pre id="preview-content" class="preview-content"></pre></div></dialog>
+  <dialog id="command-dialog" class="command-dialog"><form method="dialog" class="command-search"><span>⌕</span><input id="command-input" placeholder="搜索知识，或输入页面名称…"><button aria-label="关闭">Esc</button></form><div class="command-options"><button data-command-view="search"><span>⌕</span><div><strong>搜索知识库</strong><small>查找文件与相关片段</small></div></button><button data-command-view="ask"><span>✦</span><div><strong>向 AI 提问</strong><small>获得带来源的本地回答</small></div></button><button data-command-view="library"><span>▤</span><div><strong>打开知识库</strong><small>查看数据源与索引状态</small></div></button></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

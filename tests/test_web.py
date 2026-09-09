@@ -62,12 +62,14 @@ class WebAcceptanceTests(unittest.TestCase):
     def test_page_and_privacy_safe_file_status(self) -> None:
         with urlopen(self.base_url, timeout=2) as response:  # noqa: S310 - fixed loopback URL
             page = response.read().decode()
-        self.assertIn("本地数据与搜索验收台", page)
-        self.assertIn("运行与隐私状态", page)
+        self.assertIn("本地知识工作台", page)
+        self.assertIn("今天想从你的知识库中", page)
         self.assertIn("真实 QQ/微信数据尚未开放", page)
         self.assertIn("构建 BGE 本地向量索引", page)
-        self.assertIn("Agent 安全控制中心", page)
+        self.assertIn("受控 Agent", page)
         self.assertIn("写入动作保持锁定", page)
+        self.assertIn('/assets/app.css', page)
+        self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
         self.assertIn("visible-name.txt", encoded)
@@ -78,6 +80,11 @@ class WebAcceptanceTests(unittest.TestCase):
         runtime = self._get_json("/api/runtime")
         self.assertIn("127.0.0.1", str(runtime["network"]))
         self.assertIn("Qwen3", str(runtime["chat_model"]))
+
+        with urlopen(self.base_url + "/assets/app.css", timeout=2) as response:  # noqa: S310
+            self.assertIn(".home-hero", response.read().decode())
+        with urlopen(self.base_url + "/assets/app.js", timeout=2) as response:  # noqa: S310
+            self.assertIn("runSearch", response.read().decode())
 
     def test_api_rejects_request_without_csrf_token(self) -> None:
         with self.assertRaises(HTTPError) as caught:

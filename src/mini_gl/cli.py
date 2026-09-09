@@ -82,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("deterministic", "bge-small-zh", "multilingual-e5"),
         default="bge-small-zh",
     )
-    serve = subparsers.add_parser("serve", help="Open the local visual acceptance console")
+    serve = subparsers.add_parser("serve", help="Open the local knowledge workspace")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
     chat_import = subparsers.add_parser(

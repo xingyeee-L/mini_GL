@@ -1,6 +1,10 @@
 # mini_GL
 
-mini_GL is a local-first personal knowledge retrieval and question-answering project. The first milestone establishes the product boundaries, privacy rules, architecture, data contracts, and a testable Python skeleton.
+mini_GL is a local-first personal knowledge retrieval and question-answering project. It provides safe local-file ingestion, lexical and semantic search, grounded answers from a local Qwen model, source inspection, recovery tooling, and a controlled read-only agent boundary.
+
+## Current status
+
+Phases 0–8 and the first product-facing frontend are complete. The default browser experience now contains a home page, unified search, grounded Q&A, a knowledge library, and an administrative console. Real QQ/WeChat data remains deliberately gated; only fictional fixtures and the provider-neutral chat contract are supported during development.
 
 ## Phase 1 status
 
@@ -62,19 +66,19 @@ python -m mini_gl status <source-id>
 limits of 10 MiB and eight nested directories. `status` reports paths and operational metadata,
 but never document content.
 
-## Visual acceptance console
+## Local knowledge workspace
 
-Start the local-only console and open `http://127.0.0.1:8765` in a browser:
+Start the local-only workspace and open `http://127.0.0.1:8765` in a browser:
 
 ```powershell
 $env:PYTHONPATH = "src"
 python -m mini_gl serve
 ```
 
-The console registers an explicitly selected test directory, runs the same ingestion service as
-the CLI, and displays event counts, file paths, sizes, shortened hashes, and run status. It never
-returns document contents to the browser, requires a per-process request token, and only binds to
-the loopback interface.
+The primary experience exposes home, search, grounded Q&A, and knowledge-library views. Source,
+index, model, security, and acceptance controls remain available under the integrated console.
+The service requires a per-process request token and only binds to the loopback interface. Source
+content is returned only through a current authorized snapshot for an explicit preview or answer.
 
 Development dependencies are declared in `pyproject.toml`, but Phase 0 verification intentionally works with the Python standard library.
 

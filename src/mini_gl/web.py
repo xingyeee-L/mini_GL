@@ -1,4 +1,4 @@
-"""Loopback-only visual acceptance console for ingestion."""
+"""Loopback-only product workspace and administrative console."""
 
 # ruff: noqa: E501 -- embedded HTML/CSS/JavaScript remains readable as a browser artifact.
 
@@ -28,6 +28,8 @@ from mini_gl.retrieval.lexical import LexicalSearchService
 from mini_gl.retrieval.vector import VectorSearchService
 from mini_gl.security.paths import PathPolicy
 from mini_gl.storage.sqlite import SQLiteStore
+
+STATIC_ROOT = Path(__file__).with_name("static")
 
 PAGE = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
@@ -149,15 +151,32 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/":
-            raw = PAGE.replace("__TOKEN__", json.dumps(self.server.csrf_token)).encode()
+            page = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+            page_bytes = page.replace("__TOKEN__", self.server.csrf_token).encode()
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(raw)))
+            self.send_header("Content-Length", str(len(page_bytes)))
             self.send_header("Cache-Control", "no-store")
-            self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'")
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; style-src 'self'; script-src 'self'; "
+                "connect-src 'self'; img-src 'self' data:; frame-ancestors 'none'",
+            )
             self.send_header("X-Frame-Options", "DENY")
             self.end_headers()
-            self.wfile.write(raw)
+            self.wfile.write(page_bytes)
+            return
+        if path in {"/assets/app.css", "/assets/app.js"}:
+            asset = STATIC_ROOT / Path(path).name
+            asset_bytes = asset.read_bytes()
+            media_type = "text/css" if asset.suffix == ".css" else "text/javascript"
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", f"{media_type}; charset=utf-8")
+            self.send_header("Content-Length", str(len(asset_bytes)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(asset_bytes)
             return
         if not self._authorized():
             self._json({"message": "Unauthorized request"}, HTTPStatus.FORBIDDEN)
@@ -284,7 +303,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def make_server(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> AcceptanceServer:
     if host not in {"127.0.0.1", "localhost"}:
-        raise ValueError("The acceptance console may only bind to loopback")
+        raise ValueError("The local workspace may only bind to loopback")
     server = AcceptanceServer((host, port), Handler)
     server.db_path = db_path
     server.csrf_token = secrets.token_urlsafe(32)
@@ -362,5 +381,5 @@ def reveal_path(path: Path) -> None:
 
 def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
     with make_server(db_path, host, port) as server:
-        print(f"mini_GL acceptance console: http://{host}:{server.server_port}")
+        print(f"mini_GL local workspace: http://{host}:{server.server_port}")
         server.serve_forever()
