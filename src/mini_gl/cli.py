@@ -85,6 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="Open the local knowledge workspace")
     serve.add_argument("--host", default="127.0.0.1", choices=("127.0.0.1", "localhost"))
     serve.add_argument("--port", type=int, default=8765)
+    desktop = subparsers.add_parser(
+        "desktop", help="Start mini_GL and open the system browser"
+    )
+    desktop.add_argument("--port", type=int, default=8765)
     chat_import = subparsers.add_parser(
         "chat-import", help="Import a provider-neutral versioned chat JSON export"
     )
@@ -132,6 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
         hybrid,
         ask,
         serve,
+        desktop,
         chat_import,
         chat_convert,
         backup,
@@ -147,10 +152,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     args = build_parser().parse_args(argv)
     try:
-        if args.command == "serve":
-            from mini_gl.web import serve
+        if args.command in {"serve", "desktop"}:
+            from mini_gl.web import desktop, serve
 
-            serve(args.db, args.host, args.port)
+            if args.command == "desktop":
+                desktop(args.db, args.port)
+            else:
+                serve(args.db, args.host, args.port)
             return 0
         if args.command == "chat-convert":
             from mini_gl.adapters import convert_export

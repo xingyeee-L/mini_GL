@@ -8,6 +8,9 @@ import json
 import os
 import secrets
 import subprocess
+import threading
+import webbrowser
+from collections.abc import Callable
 from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -17,12 +20,14 @@ from urllib.parse import parse_qs, urlparse
 
 from mini_gl.agent import Action, ActionRequest, DecisionStatus, PolicyEngine
 from mini_gl.chat_import import ChatImportService
+from mini_gl.desktop import pick_directory, runtime_diagnostics
 from mini_gl.generation.context import ContextBuilder
 from mini_gl.generation.local_http import LocalOpenAIChatModel
 from mini_gl.generation.models import ChatModel
 from mini_gl.generation.service import RAGService
 from mini_gl.indexing.embeddings import EmbeddingProvider, load_bge_provider
 from mini_gl.ingestion import IngestionService
+from mini_gl.maintenance import backup_database, restore_database
 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
 from mini_gl.retrieval.lexical import LexicalSearchService
 from mini_gl.retrieval.vector import VectorSearchService
@@ -85,6 +90,7 @@ class AcceptanceServer(ThreadingHTTPServer):
     embedding_provider: EmbeddingProvider | None
     chat_model: ChatModel
     policy: PolicyEngine
+    directory_picker: Callable[[], Path | None]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -148,6 +154,20 @@ class Handler(BaseHTTPRequestHandler):
         if decision.status is not DecisionStatus.ALLOW:
             raise PermissionError("Agent read action was denied by the permission intersection")
 
+    def _authorize_sources(
+        self, store: SQLiteStore, action: Action, requested_source: str
+    ) -> list[str]:
+        source_ids = (
+            [str(source["source_id"]) for source in store.status()]
+            if requested_source == "all"
+            else [requested_source]
+        )
+        if not source_ids:
+            raise ValueError("No registered source is available")
+        for source_id in source_ids:
+            self._authorize_read(store, action, source_id)
+        return source_ids
+
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/":
@@ -193,6 +213,8 @@ class Handler(BaseHTTPRequestHandler):
                             "chat_model": "Qwen3 4B（Ollama 本地）",
                         }
                     )
+                elif path == "/api/diagnostics":
+                    self._json(runtime_diagnostics(store, self.server.db_path))
                 elif path.startswith("/api/source/"):
                     source_id = path.removeprefix("/api/source/")
                     status = store.status(source_id)[0]
@@ -206,23 +228,37 @@ class Handler(BaseHTTPRequestHandler):
                 elif path == "/api/search":
                     query = parse_qs(urlparse(self.path).query)
                     source_id = query.get("source_id", [""])[0]
-                    self._authorize_read(store, Action.SEARCH, source_id)
+                    self._authorize_sources(store, Action.SEARCH, source_id)
                     result = LexicalSearchService(store).search(
                         query.get("q", [""])[0],
-                        source_id=source_id,
+                        source_id=None if source_id == "all" else source_id,
                         file_type=query.get("file_type", [None])[0],
                     )
                     self._json(result)
                 elif path == "/api/hybrid-search":
                     query = parse_qs(urlparse(self.path).query)
                     source_id = query.get("source_id", [""])[0]
-                    self._authorize_read(store, Action.SEARCH, source_id)
+                    source_ids = self._authorize_sources(store, Action.SEARCH, source_id)
                     lexical = LexicalSearchService(store)
                     vector = VectorSearchService(store, self._embedding())
-                    results = HybridSearchService(
-                        lexical, vector, TokenOverlapReranker()
-                    ).search(query.get("q", [""])[0], source_id)
-                    self._json({"results": results})
+                    service = HybridSearchService(lexical, vector, TokenOverlapReranker())
+                    results = [
+                        result
+                        for current_source in source_ids
+                        for result in service.search(
+                            query.get("q", [""])[0],
+                            current_source,
+                            limit=10,
+                            file_type=query.get("file_type", [None])[0],
+                        )
+                    ]
+                    results.sort(
+                        key=lambda result: (
+                            -_result_score(result),
+                            str(result["chunk_id"]),
+                        )
+                    )
+                    self._json({"results": results[:10]})
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -237,8 +273,20 @@ class Handler(BaseHTTPRequestHandler):
             with SQLiteStore(self.server.db_path) as store:
                 service = IngestionService(store)
                 if self.path == "/api/register":
+                    if body.get("authorized") is not True:
+                        raise PermissionError(
+                            "Explicit authorization is required before registering real files"
+                        )
                     source = service.register(Path(str(body["root"])))
                     self._json({"source_id": source.source_id})
+                elif self.path == "/api/pick-directory":
+                    selected = self.server.directory_picker()
+                    self._json(
+                        {
+                            "selected": selected is not None,
+                            "path": str(selected.resolve()) if selected is not None else None,
+                        }
+                    )
                 elif self.path == "/api/chat-import":
                     self._json(
                         ChatImportService(store).import_file(
@@ -295,6 +343,21 @@ class Handler(BaseHTTPRequestHandler):
                             store, source_id, str(body["document_id"])
                         )
                     )
+                elif self.path == "/api/backup":
+                    self._json(
+                        backup_database(
+                            self.server.db_path, Path(str(body["destination"]))
+                        )
+                    )
+                elif self.path == "/api/restore":
+                    if body.get("confirmation") != "RESTORE":
+                        raise PermissionError("Restore confirmation did not match")
+                    self._json(
+                        restore_database(
+                            Path(str(body["backup"])),
+                            Path(str(body["destination"])),
+                        )
+                    )
                 else:
                     self._json({"message": "Not found"}, HTTPStatus.NOT_FOUND)
         except Exception as exc:
@@ -309,6 +372,7 @@ def make_server(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> Acc
     server.csrf_token = secrets.token_urlsafe(32)
     server.embedding_provider = None
     server.policy = PolicyEngine()
+    server.directory_picker = pick_directory
     server.chat_model = LocalOpenAIChatModel(
         "http://127.0.0.1:11434/v1/chat/completions",
         "qwen3:4b-instruct-2507-q4_K_M",
@@ -373,6 +437,11 @@ def source_preview(
     }
 
 
+def _result_score(result: dict[str, object]) -> float:
+    value = result.get("final_score", result.get("score", 0.0))
+    return float(value) if isinstance(value, (int, float)) else 0.0
+
+
 def reveal_path(path: Path) -> None:
     if os.name != "nt":
         raise RuntimeError("Source reveal is currently supported on Windows only")
@@ -382,4 +451,13 @@ def reveal_path(path: Path) -> None:
 def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
     with make_server(db_path, host, port) as server:
         print(f"mini_GL local workspace: http://{host}:{server.server_port}")
+        server.serve_forever()
+
+
+def desktop(db_path: Path, port: int = 8765) -> None:
+    """Start the loopback workspace and open it in the system browser once ready."""
+    with make_server(db_path, "127.0.0.1", port) as server:
+        url = f"http://127.0.0.1:{server.server_port}"
+        threading.Timer(0.4, webbrowser.open, args=(url,)).start()
+        print(f"mini_GL desktop workspace: {url}")
         server.serve_forever()

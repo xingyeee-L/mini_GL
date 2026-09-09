@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 from mini_gl.generation.models import ChatResponse
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
+from mini_gl.retrieval.lexical import LexicalSearchService
 from mini_gl.storage.sqlite import SQLiteStore
 from mini_gl.web import make_server, resolve_document_path, source_preview
 
@@ -68,6 +69,8 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("构建 BGE 本地向量索引", page)
         self.assertIn("受控 Agent", page)
         self.assertIn("写入动作保持锁定", page)
+        self.assertIn("选择文件夹", page)
+        self.assertIn('id="register-root"', page)
         self.assertIn('/assets/app.css', page)
         self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
@@ -84,13 +87,58 @@ class WebAcceptanceTests(unittest.TestCase):
         with urlopen(self.base_url + "/assets/app.css", timeout=2) as response:  # noqa: S310
             self.assertIn(".home-hero", response.read().decode())
         with urlopen(self.base_url + "/assets/app.js", timeout=2) as response:  # noqa: S310
-            self.assertIn("runSearch", response.read().decode())
+            script = response.read().decode()
+            self.assertIn("runSearch", script)
+            self.assertIn('value = "all"', script)
 
     def test_api_rejects_request_without_csrf_token(self) -> None:
         with self.assertRaises(HTTPError) as caught:
             urlopen(self.base_url + "/api/sources", timeout=2)  # noqa: S310
         self.assertEqual(caught.exception.code, 403)
         caught.exception.close()
+
+    def test_real_source_registration_requires_explicit_authorization(self) -> None:
+        another = self.base / "another-source"
+        another.mkdir()
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json("/api/register", {"root": str(another)})
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        registered = self._post_json(
+            "/api/register", {"root": str(another), "authorized": True}
+        )
+        self.assertTrue(registered["source_id"])
+
+    def test_native_directory_picker_only_returns_path_without_registering(self) -> None:
+        selected = self.base / "selected-but-not-registered"
+        selected.mkdir()
+        self.server.directory_picker = lambda: selected
+        picked = self._post_json("/api/pick-directory", {})
+        self.assertEqual(picked, {"selected": True, "path": str(selected.resolve())})
+        sources = self._get_json("/api/sources")
+        self.assertEqual(len(sources), 1)
+
+    def test_runtime_diagnostics_and_visual_backup_restore(self) -> None:
+        diagnostics = self._get_json("/api/diagnostics")
+        self.assertEqual(diagnostics["database_integrity"], "ok")
+        self.assertEqual(diagnostics["sources"], 1)
+        self.assertIn("reachable", diagnostics["ollama"])
+
+        backup = self.base / "backup.sqlite3"
+        backup_result = self._post_json(
+            "/api/backup", {"destination": str(backup)}
+        )
+        self.assertEqual(backup_result["integrity"], "ok")
+        restored = self.base / "restored.sqlite3"
+        restore_result = self._post_json(
+            "/api/restore",
+            {
+                "backup": str(backup),
+                "destination": str(restored),
+                "confirmation": "RESTORE",
+            },
+        )
+        self.assertEqual(restore_result["integrity"], "ok")
 
     def test_server_rejects_non_loopback_binding(self) -> None:
         with self.assertRaisesRegex(ValueError, "loopback"):
@@ -137,6 +185,26 @@ class WebAcceptanceTests(unittest.TestCase):
                 (self.source_id,),
             ).fetchall()
             self.assertIn(("search", "allow"), [(row[0], row[1]) for row in audit])
+
+    def test_cross_source_lexical_search_is_authorized_per_source(self) -> None:
+        second_root = self.base / "second-source"
+        second_root.mkdir()
+        (second_root / "other.txt").write_text("cross source phrase", encoding="utf-8")
+        with SQLiteStore(self.db) as store:
+            service = IngestionService(store)
+            second = service.register(second_root)
+            service.sync(second.source_id)
+            LexicalSearchService(store).rebuild()
+        result = self._get_json("/api/search?source_id=all&q=cross%20source%20phrase")
+        self.assertEqual(result["results"][0]["title"], "other.txt")
+        with SQLiteStore(self.db) as store:
+            audited_sources = {
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT source_id FROM agent_action_audit WHERE action='search'"
+                )
+            }
+        self.assertEqual(audited_sources, {self.source_id, second.source_id})
 
     def test_visual_grounded_answer_flow(self) -> None:
         body = {"source_id": self.source_id}

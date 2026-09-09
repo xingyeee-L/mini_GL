@@ -119,13 +119,24 @@ function makeLibraryCard(source, detail) {
 }
 
 async function loadAll(keep = true) {
-  const old = byId("sources").value;
+  const previous = {
+    sources: byId("sources").value,
+    search: byId("search-source").value,
+    ask: byId("ask-source").value,
+  };
   const [runtime, sourceList] = await Promise.all([api("/api/runtime"), api("/api/sources")]);
   sources = sourceList;
   byId("network-state").textContent = runtime.network;
   byId("embedding-state").textContent = runtime.embedding;
   byId("model-state").textContent = runtime.chat_model;
-  [byId("sources"), byId("search-source"), byId("ask-source")].forEach((select) => fillSourceSelect(select, keep ? old : ""));
+  fillSourceSelect(byId("sources"), keep ? previous.sources : "");
+  fillSourceSelect(byId("search-source"), keep ? previous.search : "");
+  fillSourceSelect(byId("ask-source"), keep ? previous.ask : "");
+  const allSources = document.createElement("option");
+  allSources.value = "all";
+  allSources.textContent = "全部已授权数据源";
+  byId("search-source").prepend(allSources);
+  if (!keep || !previous.search) byId("search-source").value = "all";
 
   const entries = await Promise.all(sources.map(async (source) => {
     try { return [source.source_id, await api(`/api/source/${encodeURIComponent(source.source_id)}`)]; }
@@ -318,8 +329,18 @@ byId("refresh").onclick = () => loadAll();
 
 byId("register").addEventListener("submit", async (event) => {
   event.preventDefault();
-  try { const root = new FormData(event.target).get("root"); await api("/api/register", {method: "POST", body: JSON.stringify({root})}); await loadAll(false); showToast("数据源已注册"); }
+  try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("真实资料目录已安全注册，可以开始只读同步"); }
   catch (error) { showToast(error.message, true); }
+});
+
+byId("choose-root").addEventListener("click", async () => {
+  try {
+    const output = await api("/api/pick-directory", {method: "POST", body: "{}"});
+    if (output.selected) {
+      byId("register-root").value = output.path;
+      showToast("文件夹已选择；确认授权后再注册");
+    }
+  } catch (error) { showToast(`无法打开文件夹选择器：${error.message}`, true); }
 });
 
 byId("chat-import").addEventListener("submit", async (event) => {
@@ -342,6 +363,45 @@ byId("vector-index").onclick = () => sourceAction("/api/vector-index", "正在�
 byId("pause").onclick = async () => { try { const id = byId("sources").value; const source = sources.find((item) => item.source_id === id); await api("/api/source-pause", {method: "POST", body: JSON.stringify({source_id: id, paused: !source.paused})}); await loadAll(); showToast(source.paused ? "数据源已恢复" : "数据源已暂停"); } catch (error) { showToast(error.message, true); } };
 byId("delete-derived").onclick = async () => { const id = byId("sources").value; if (!id) return; const suffix = id.slice(-8); const answer = window.prompt(`只删除应用生成的数据，不删除原文件。请输入 ${suffix} 确认：`); if (answer !== suffix) return; try { await api("/api/delete-derived", {method: "POST", body: JSON.stringify({source_id: id, confirmation: suffix})}); await loadAll(); showToast("派生数据已删除，原文件未修改"); } catch (error) { showToast(error.message, true); } };
 
+function diagnosticItem(label, value, healthy = true) {
+  const item = document.createElement("div");
+  const title = document.createElement("strong");
+  title.textContent = `${healthy ? "✓" : "!"} ${label}`;
+  const detail = document.createElement("span");
+  detail.textContent = value;
+  item.append(title, detail);
+  return item;
+}
+
+async function diagnose() {
+  const container = byId("diagnostic-results");
+  container.textContent = "正在检查本地运行环境…";
+  try {
+    const output = await api("/api/diagnostics");
+    const ollama = output.ollama;
+    container.replaceChildren(
+      diagnosticItem("Python", output.python),
+      diagnosticItem("SQLite", `${output.sqlite} · ${output.database_integrity}`, output.database_integrity === "ok"),
+      diagnosticItem("本地模型服务", ollama.reachable ? "Ollama 已连接" : "Ollama 未运行", ollama.reachable),
+      diagnosticItem("Qwen 模型", ollama.model_available ? "已安装" : "未检测到固定模型", ollama.model_available),
+      diagnosticItem("数据规模", `${output.documents} 文档 · ${output.vector_chunks} 向量片段`),
+      diagnosticItem("数据库", `${Math.ceil(output.database_size / 1024)} KiB`)
+    );
+  } catch (error) { container.textContent = `诊断失败：${error.message}`; }
+}
+
+byId("diagnose").onclick = diagnose;
+byId("backup-form").addEventListener("submit", async (event) => {
+  event.preventDefault(); const status = byId("maintenance-status");
+  try { const destination = new FormData(event.target).get("destination"); const output = await api("/api/backup", {method: "POST", body: JSON.stringify({destination})}); status.textContent = `备份完成：${output.path} · ${output.integrity} · SHA-256 ${output.sha256.slice(0, 12)}…`; }
+  catch (error) { status.textContent = `备份失败：${error.message}`; status.className = "inline-status error"; }
+});
+byId("restore-form").addEventListener("submit", async (event) => {
+  event.preventDefault(); const status = byId("maintenance-status"); const form = new FormData(event.target);
+  try { const output = await api("/api/restore", {method: "POST", body: JSON.stringify({backup: form.get("backup"), destination: form.get("destination"), confirmation: form.get("confirmed") === "on" ? "RESTORE" : ""})}); status.textContent = `恢复副本已创建：${output.path} · 当前运行数据库未替换`; }
+  catch (error) { status.textContent = `恢复失败：${error.message}`; status.className = "inline-status error"; }
+});
+
 const commandDialog = byId("command-dialog");
 byId("command-open").onclick = () => { commandDialog.showModal(); byId("command-input").focus(); };
 document.addEventListener("keydown", (event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") { event.preventDefault(); commandDialog.showModal(); byId("command-input").focus(); } });
@@ -350,3 +410,4 @@ byId("command-input").addEventListener("keydown", (event) => { if (event.key ===
 
 switchView(location.hash.slice(1) || "home");
 loadAll().catch((error) => showToast(`无法读取本地状态：${error.message}`, true));
+diagnose();

@@ -80,6 +80,21 @@ index, model, security, and acceptance controls remain available under the integ
 The service requires a per-process request token and only binds to the loopback interface. Source
 content is returned only through a current authorized snapshot for an explicit preview or answer.
 
+On Windows, `start-mini-gl.cmd` provides the current one-click entry. The equivalent command is:
+
+```powershell
+$env:PYTHONPATH = "src"
+python -m mini_gl desktop
+```
+
+The desktop workspace adds local runtime diagnostics, explicit real-folder authorization,
+cross-source search, and verified backup/restore-to-new-path controls. Real folders remain limited
+to TXT/Markdown until additional parsers receive separate security review.
+
+Use **Console → Data & Index → Choose folder** to select a real TXT/Markdown folder with the
+native Windows dialog. Selection only fills the path; registration still requires explicit
+authorization, and document contents are read only after the user starts a read-only sync.
+
 Development dependencies are declared in `pyproject.toml`, but Phase 0 verification intentionally works with the Python standard library.
 
 ## Next milestone
