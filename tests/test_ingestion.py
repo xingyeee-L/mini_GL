@@ -7,8 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests._docx_fixture import write_docx
+
 from mini_gl.connectors.base import ChangeKind
 from mini_gl.ingestion import IngestionService
+from mini_gl.parsers.docx import DocxParseError
 from mini_gl.parsers.text import TextParseError
 from mini_gl.storage.sqlite import SQLiteStore
 
@@ -66,6 +69,86 @@ class IngestionTests(unittest.TestCase):
                 json.loads(row["metadata_json"])["encoding"] == "utf-8"
                 for row in documents
             )
+        )
+
+    def test_docx_change_lifecycle_uses_the_same_atomic_source_pipeline(self) -> None:
+        document = self.root / "brief.docx"
+        write_docx(document)
+        original = self._fingerprint(document)
+        source = self.service.register(self.root)
+
+        self.assertIn(".docx", source.allowed_extensions)
+        self.assertEqual(
+            self.service.sync(source.source_id),
+            {"created": 1, "updated": 0, "unchanged": 0, "deleted": 0},
+        )
+        self.assertEqual(self._fingerprint(document), original)
+        row = self.store.connection.execute(
+            "SELECT title,content,metadata_json FROM documents WHERE source_id=?",
+            (source.source_id,),
+        ).fetchone()
+        metadata = json.loads(row["metadata_json"])
+        self.assertEqual(row["title"], "brief.docx")
+        self.assertEqual(row["content"], "fictional project decision")
+        self.assertEqual(metadata["parser"], "docx-ooxml-v1")
+
+        write_docx(
+            document,
+            document=(
+                b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main"><w:body><w:p><w:r>'
+                b"<w:t>revised fictional decision</w:t></w:r></w:p></w:body>"
+                b"</w:document>"
+            ),
+        )
+        self.assertEqual(
+            self.service.sync(source.source_id),
+            {"created": 0, "updated": 1, "unchanged": 0, "deleted": 0},
+        )
+        document.unlink()
+        self.assertEqual(
+            self.service.sync(source.source_id),
+            {"created": 0, "updated": 0, "unchanged": 0, "deleted": 1},
+        )
+
+    def test_explicit_reregistration_adds_docx_without_widening_limits(self) -> None:
+        old = self.store.register_source(
+            self.root, 1_024, 2, frozenset({".txt", ".md"})
+        )
+
+        upgraded = self.service.register(self.root)
+
+        self.assertEqual(upgraded.source_id, old.source_id)
+        self.assertEqual(upgraded.allowed_extensions, frozenset({".txt", ".md", ".docx"}))
+        self.assertEqual(upgraded.max_file_size, 1_024)
+        self.assertEqual(upgraded.max_depth, 2)
+
+    def test_unsafe_docx_rolls_back_without_false_deletions(self) -> None:
+        original = self.root / "keep.txt"
+        original.write_text("fictional stable content", encoding="utf-8")
+        source = self.service.register(self.root)
+        self.service.sync(source.source_id)
+        original.unlink()
+        unsafe = self.root / "unsafe.docx"
+        write_docx(
+            unsafe,
+            document=(
+                b'<!DOCTYPE w:document [<!ENTITY x "expanded">]>'
+                b'<w:document xmlns:w="http://schemas.openxmlformats.org/'
+                b'wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>&x;</w:t>'
+                b"</w:r></w:p></w:body></w:document>"
+            ),
+        )
+
+        with self.assertRaises(DocxParseError):
+            self.service.sync(source.source_id)
+
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
+        self.assertEqual(
+            self.store.connection.execute(
+                "SELECT COUNT(*) FROM change_events WHERE kind='deleted'"
+            ).fetchone()[0],
+            0,
         )
 
     def test_failed_scan_rolls_back_and_never_emits_delete(self) -> None:

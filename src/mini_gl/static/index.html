@@ -92,7 +92,7 @@
               <div class="large-input"><span>⌕</span><input name="query" required placeholder="输入文件名、关键词或你记得的一句话"></div>
               <select id="search-source" name="source_id" aria-label="搜索数据源"></select>
               <select name="mode" aria-label="检索方式"><option value="lexical">关键词 BM25</option><option value="hybrid">BGE 混合检索</option></select>
-              <select name="file_type" aria-label="文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select>
+              <select name="file_type" aria-label="文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option><option value=".docx">Word DOCX</option></select>
               <button class="primary">搜索</button>
             </form>
             <div class="result-header"><p id="search-status" aria-live="polite">选择一个数据源，开始搜索。</p><span id="search-mode-note">结果不会跨越所选数据源权限。</span></div>
@@ -108,7 +108,7 @@
               <div id="answer-wrap" class="answer-wrap" hidden><div class="question-bubble" id="question-display"></div><div class="assistant-answer"><span class="assistant-orb small">✦</span><div><div id="answer" class="answer"></div><div id="answer-meta" class="answer-meta"></div></div></div></div>
               <form id="ask-form" class="ask-composer">
                 <textarea name="question" required maxlength="500" rows="2" placeholder="例如：这个项目如何保护原始文件？"></textarea>
-                <div><select id="ask-source" name="source_id" aria-label="问答数据源"></select><select name="file_type" aria-label="限定文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option></select><button class="primary">发送 ↑</button></div>
+                <div><select id="ask-source" name="source_id" aria-label="问答数据源"></select><select name="file_type" aria-label="限定文件类型"><option value="">全部类型</option><option value=".txt">TXT</option><option value=".md">Markdown</option><option value=".docx">Word DOCX</option></select><button class="primary">发送 ↑</button></div>
               </form>
               <p id="ask-status" class="inline-status" aria-live="polite">本地 Qwen · 每个事实必须通过来源校验</p>
             </section>
@@ -137,7 +137,7 @@
 
           <section class="console-panel" data-console="sources">
             <div class="console-grid">
-              <section class="surface"><h2>添加真实本地资料</h2><form id="register" class="stack-form"><label>TXT/Markdown 资料根目录<span class="path-picker"><input id="register-root" name="root" required placeholder="C:\Users\你\Documents\我的资料"><button class="secondary" id="choose-root" type="button">选择文件夹</button></span></label><label class="check"><input name="authorized" type="checkbox" required>我明确选择此目录，并确认自己有权使用其中资料</label><button class="primary">安全注册目录</button></form><p class="inline-status">选择文件夹只会填入路径；勾选授权并注册后仍不会读取正文。仅主动同步时处理 .txt 与 .md，且不会修改、移动或删除原文件。</p><div class="divider"><span>或</span></div><form id="chat-import" class="stack-form"><label>中立聊天 JSON 绝对路径<input name="path" required placeholder="C:\path\to\neutral-chat.json"></label><label class="check"><input name="authorized" type="checkbox" required>我确认自己有权使用这份导出文件</label><button class="secondary">只读导入聊天记录</button></form><p id="chat-status" class="inline-status">不读取或解密聊天客户端数据库。</p></section>
+              <section class="surface"><h2>添加真实本地资料</h2><form id="register" class="stack-form"><label>TXT Markdown DOCX 资料根目录<span class="path-picker"><input id="register-root" name="root" required placeholder="C:\Users\你\Documents\我的资料"><button class="secondary" id="choose-root" type="button">选择文件夹</button></span></label><label class="check"><input name="authorized" type="checkbox" required>我明确选择此目录，并确认自己有权使用其中资料</label><button class="primary">安全注册目录</button></form><p class="inline-status">选择文件夹只会填入路径；勾选授权并注册后仍不会读取正文。仅主动同步时处理 .txt、.md 与安全 DOCX；原文件不会被修改、移动或删除。已有数据源需重新授权同一目录后才会开放 DOCX。</p><div class="divider"><span>或</span></div><form id="chat-import" class="stack-form"><label>中立聊天 JSON 绝对路径<input name="path" required placeholder="C:\path\to\neutral-chat.json"></label><label class="check"><input name="authorized" type="checkbox" required>我确认自己有权使用这份导出文件</label><button class="secondary">只读导入聊天记录</button></form><p id="chat-status" class="inline-status">不读取或解密聊天客户端数据库。</p></section>
               <section class="surface"><h2>同步与索引</h2><label>当前数据源<select id="sources"></select></label><div class="action-grid"><button class="primary" id="sync">执行只读同步</button><button id="index">重建关键词索引</button><button id="vector-index">构建 BGE 本地向量索引</button><button id="pause">暂停数据源</button><button class="danger-ghost" id="delete-derived">删除派生数据</button><button id="refresh">刷新状态</button></div><p id="message" class="inline-status" aria-live="polite">正在读取本地状态…</p></section>
             </div>
             <section class="surface"><div class="section-heading compact"><div><h2>最近一次同步</h2><p>正文不会显示在控制台列表中</p></div></div><div class="metrics"><div><span>新增</span><strong id="created">0</strong></div><div><span>更新</span><strong id="updated">0</strong></div><div><span>未变化</span><strong id="unchanged">0</strong></div><div><span>删除</span><strong id="deleted">0</strong></div></div><div class="table-wrap"><table><thead><tr><th>相对路径</th><th>大小</th><th>SHA-256</th><th>最近事件</th></tr></thead><tbody id="files"></tbody></table></div></section>

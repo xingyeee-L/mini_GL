@@ -1,4 +1,4 @@
-"""Read-only local TXT/Markdown connector."""
+"""Read-only local TXT, Markdown, and DOCX connector."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mini_gl.domain.models import SourceDocument
+from mini_gl.parsers.docx import parse_docx
 from mini_gl.parsers.text import parse_text
 from mini_gl.security.paths import PathPolicy, PathPolicyError
 
@@ -59,7 +60,11 @@ class LocalFileConnector:
             if path.suffix.lower() not in {ext.lower() for ext in self.policy.allowed_extensions}:
                 continue
             authorized = self.policy.authorize(path)
-            parsed = parse_text(authorized)
+            parsed = (
+                parse_docx(authorized)
+                if authorized.suffix.lower() == ".docx"
+                else parse_text(authorized)
+            )
             relative = authorized.relative_to(self.root).as_posix()
             object_id = object_id_for(self.source_id, relative)
             info = parsed.stat_result
@@ -78,6 +83,11 @@ class LocalFileConnector:
                     "encoding": parsed.encoding,
                     "relative_path": relative,
                     "size": parsed.size,
+                    "parser": (
+                        "docx-ooxml-v1"
+                        if authorized.suffix.lower() == ".docx"
+                        else "plain-text-v1"
+                    ),
                 },
             )
             found.append(ScannedFile(object_id, relative, document, parsed.size, info.st_mtime_ns))

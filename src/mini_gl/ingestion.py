@@ -9,7 +9,7 @@ from mini_gl.connectors.local_files import LocalFileConnector
 from mini_gl.security.paths import DEFAULT_MAX_DEPTH, DEFAULT_MAX_FILE_SIZE, PathPolicy
 from mini_gl.storage.sqlite import RegisteredSource, SQLiteStore
 
-DEFAULT_EXTENSIONS = frozenset({".txt", ".md"})
+DEFAULT_EXTENSIONS = frozenset({".txt", ".md", ".docx"})
 
 
 class IngestionService:

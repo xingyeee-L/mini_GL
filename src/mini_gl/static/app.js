@@ -333,7 +333,7 @@ byId("refresh").onclick = () => loadAll();
 
 byId("register").addEventListener("submit", async (event) => {
   event.preventDefault();
-  try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("真实资料目录已安全注册，可以开始只读同步"); }
+  try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("TXT、Markdown 与安全 DOCX 已授权，可以开始只读同步"); }
   catch (error) { showToast(error.message, true); }
 });
 

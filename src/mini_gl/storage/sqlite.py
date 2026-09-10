@@ -375,6 +375,14 @@ class SQLiteStore:
                 )
         else:
             source_id = existing["source_id"]
+            existing_extensions = frozenset(json.loads(existing["allowed_extensions"]))
+            merged_extensions = existing_extensions | extensions
+            if merged_extensions != existing_extensions:
+                with self.connection:
+                    self.connection.execute(
+                        "UPDATE sources SET allowed_extensions=? WHERE source_id=?",
+                        (json.dumps(sorted(merged_extensions)), source_id),
+                    )
         return self.get_source(source_id)
 
     def get_source(self, source_id: str) -> RegisteredSource:

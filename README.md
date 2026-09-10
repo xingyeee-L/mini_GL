@@ -9,7 +9,7 @@ Phases 0–8 and the first product-facing frontend are complete. The default bro
 ## Phase 1 status
 
 - Explicit local source roots can be registered through the CLI.
-- TXT and Markdown are scanned through extension, size, depth, and path-boundary policies.
+- TXT, Markdown, and security-reviewed DOCX are scanned through extension, size, depth, and path-boundary policies.
 - Symbolic links and Windows reparse points fail closed.
 - UTF-8, BOM-marked UTF-16, and GB18030 content is normalized into `SourceDocument`.
 - SQLite stores sources, sync runs, file snapshots, documents, and idempotent change events.
@@ -90,12 +90,14 @@ python -m mini_gl desktop
 The desktop workspace adds local runtime diagnostics, explicit real-folder authorization,
 cross-source search and grounded Q&A, plus verified backup/restore-to-new-path controls. Every
 cross-source read is authorized and audited per source, and citations retain their source ID.
-Real folders remain limited
-to TXT/Markdown until additional parsers receive separate security review.
+DOCX extraction is dependency-free and bounded: it rejects unsafe package paths, XML entities,
+compression bombs, macros, ActiveX, and embedded objects, and never follows external links.
+PDF, legacy DOC, and other Office formats remain blocked pending separate security review.
 
-Use **Console → Data & Index → Choose folder** to select a real TXT/Markdown folder with the
+Use **Console → Data & Index → Choose folder** to select a real TXT/Markdown/DOCX folder with the
 native Windows dialog. Selection only fills the path; registration still requires explicit
 authorization, and document contents are read only after the user starts a read-only sync.
+Existing sources must be explicitly re-registered before DOCX is added to their allowlist.
 
 Development dependencies are declared in `pyproject.toml`, but Phase 0 verification intentionally works with the Python standard library.
 

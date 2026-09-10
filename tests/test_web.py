@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import threading
@@ -7,6 +8,8 @@ import unittest
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
+
+from tests._docx_fixture import write_docx
 
 from mini_gl.generation.models import ChatResponse
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
@@ -73,6 +76,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("选择文件夹", page)
         self.assertIn('id="register-root"', page)
         self.assertIn("首次运行检查", page)
+        self.assertIn("Word DOCX", page)
         self.assertIn('/assets/app.css', page)
         self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
@@ -119,6 +123,29 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertEqual(picked, {"selected": True, "path": str(selected.resolve())})
         sources = self._get_json("/api/sources")
         self.assertEqual(len(sources), 1)
+
+    def test_visual_docx_registration_sync_and_search_flow(self) -> None:
+        root = self.base / "docx-source"
+        root.mkdir()
+        document = root / "fictional-brief.docx"
+        write_docx(document)
+        original_hash = hashlib.sha256(document.read_bytes()).hexdigest()
+        registered = self._post_json(
+            "/api/register", {"root": str(root), "authorized": True}
+        )
+        source_id = str(registered["source_id"])
+
+        synced = self._post_json("/api/sync", {"source_id": source_id})
+        self.assertEqual(synced["created"], 1)
+        self._post_json("/api/index", {"source_id": source_id})
+        result = self._get_json(
+            f"/api/search?source_id={source_id}&q=fictional%20decision&file_type=.docx"
+        )
+
+        self.assertEqual(result["results"][0]["title"], document.name)
+        self.assertEqual(
+            hashlib.sha256(document.read_bytes()).hexdigest(), original_hash
+        )
 
     def test_runtime_diagnostics_and_visual_backup_restore(self) -> None:
         diagnostics = self._get_json("/api/diagnostics")
