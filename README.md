@@ -88,7 +88,9 @@ python -m mini_gl desktop
 ```
 
 The desktop workspace adds local runtime diagnostics, explicit real-folder authorization,
-cross-source search, and verified backup/restore-to-new-path controls. Real folders remain limited
+cross-source search and grounded Q&A, plus verified backup/restore-to-new-path controls. Every
+cross-source read is authorized and audited per source, and citations retain their source ID.
+Real folders remain limited
 to TXT/Markdown until additional parsers receive separate security review.
 
 Use **Console → Data & Index → Choose folder** to select a real TXT/Markdown folder with the

@@ -8,6 +8,7 @@ import platform
 import sqlite3
 from pathlib import Path
 
+from mini_gl.indexing.embeddings import BGE_DEFAULT_PATH
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -45,6 +46,12 @@ def runtime_diagnostics(store: SQLiteStore, database: Path) -> dict[str, object]
     lexical_count = store.connection.execute("SELECT COUNT(*) FROM lexical_chunks").fetchone()[0]
     vector_count = store.connection.execute("SELECT COUNT(*) FROM vector_chunks").fetchone()[0]
     model = _ollama_health()
+    embedding_path = BGE_DEFAULT_PATH.resolve()
+    embedding = {
+        "available": embedding_path.is_dir(),
+        "model": "BAAI/bge-small-zh-v1.5",
+        "path": str(embedding_path),
+    }
     return {
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version,
@@ -55,7 +62,13 @@ def runtime_diagnostics(store: SQLiteStore, database: Path) -> dict[str, object]
         "lexical_chunks": lexical_count,
         "vector_chunks": vector_count,
         "ollama": model,
-        "ready": integrity == "ok" and bool(model["reachable"]),
+        "embedding": embedding,
+        "ready": (
+            integrity == "ok"
+            and bool(model["reachable"])
+            and bool(model["model_available"])
+            and bool(embedding["available"])
+        ),
     }
 
 

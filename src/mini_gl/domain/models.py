@@ -61,6 +61,7 @@ class Citation:
     chunk_id: str
     source_uri: str
     title: str
+    source_id: str | None = None
     start_offset: int | None = None
     end_offset: int | None = None
     timestamp_start: datetime | None = None

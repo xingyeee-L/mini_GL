@@ -46,6 +46,13 @@ class ContextBuilder:
         self.counter = ConservativeTokenCounter()
 
     def build(self, source_id: str, ranked: list[dict[str, object]]) -> ContextBundle:
+        return self.build_many((source_id,), ranked)
+
+    def build_many(
+        self, source_ids: tuple[str, ...], ranked: list[dict[str, object]]
+    ) -> ContextBundle:
+        """Build one bounded context from results already authorized per source."""
+        allowed_sources = frozenset(source_ids)
         sections: list[str] = []
         citations: list[Citation] = []
         evidence: list[str] = []
@@ -54,10 +61,14 @@ class ContextBuilder:
         for result in ranked:
             if len(sections) >= self.max_chunks or used_tokens >= self.max_tokens:
                 break
+            result_source = str(result.get("source_id", ""))
+            if result_source not in allowed_sources:
+                continue
             row = self.store.connection.execute(
-                "SELECT chunk_id,document_id,source_uri,title,content FROM lexical_chunks "
+                "SELECT chunk_id,document_id,source_id,source_uri,title,content "
+                "FROM lexical_chunks "
                 "WHERE source_id=? AND chunk_id=?",
-                (source_id, str(result["chunk_id"])),
+                (result_source, str(result["chunk_id"])),
             ).fetchone()
             if row is None:
                 continue
@@ -83,6 +94,7 @@ class ContextBuilder:
                     chunk_id=str(row["chunk_id"]),
                     source_uri=str(row["source_uri"]),
                     title=str(row["title"]),
+                    source_id=str(row["source_id"]),
                     start_offset=0,
                     end_offset=len(content),
                 )

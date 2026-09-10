@@ -12,6 +12,7 @@ from mini_gl.generation.models import ChatResponse
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
 from mini_gl.retrieval.lexical import LexicalSearchService
+from mini_gl.retrieval.vector import VectorSearchService
 from mini_gl.storage.sqlite import SQLiteStore
 from mini_gl.web import make_server, resolve_document_path, source_preview
 
@@ -71,6 +72,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("写入动作保持锁定", page)
         self.assertIn("选择文件夹", page)
         self.assertIn('id="register-root"', page)
+        self.assertIn("首次运行检查", page)
         self.assertIn('/assets/app.css', page)
         self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
@@ -123,6 +125,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertEqual(diagnostics["database_integrity"], "ok")
         self.assertEqual(diagnostics["sources"], 1)
         self.assertIn("reachable", diagnostics["ollama"])
+        self.assertIn("available", diagnostics["embedding"])
 
         backup = self.base / "backup.sqlite3"
         backup_result = self._post_json(
@@ -143,6 +146,10 @@ class WebAcceptanceTests(unittest.TestCase):
     def test_server_rejects_non_loopback_binding(self) -> None:
         with self.assertRaisesRegex(ValueError, "loopback"):
             make_server(self.db, "0.0.0.0", 0)  # noqa: S104 - rejection test
+
+    def test_server_rejects_a_second_instance_on_the_same_port(self) -> None:
+        with self.assertRaises(OSError):
+            make_server(self.db, port=self.server.server_port)
 
     def test_reveal_path_must_belong_to_current_snapshot(self) -> None:
         with SQLiteStore(self.db) as store:
@@ -217,6 +224,37 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertFalse(result["insufficient_evidence"])
         self.assertEqual(result["citations"][0]["title"], "visible-name.txt")
         self.assertEqual(result["prompt_tokens"], 12)
+
+    def test_cross_source_answer_authorizes_and_preserves_citation_source(self) -> None:
+        second_root = self.base / "answer-source"
+        second_root.mkdir()
+        (second_root / "second.txt").write_text(
+            "secret body in a second source", encoding="utf-8"
+        )
+        with SQLiteStore(self.db) as store:
+            service = IngestionService(store)
+            second = service.register(second_root)
+            service.sync(second.source_id)
+            LexicalSearchService(store).rebuild()
+            VectorSearchService(store, DeterministicLocalEmbedding(64)).rebuild()
+
+        result = self._post_json(
+            "/api/ask", {"source_id": "all", "query": "secret body"}
+        )
+
+        self.assertFalse(result["insufficient_evidence"])
+        self.assertEqual(
+            {citation["source_id"] for citation in result["citations"]},
+            {self.source_id, second.source_id},
+        )
+        with SQLiteStore(self.db) as store:
+            audited_sources = {
+                row[0]
+                for row in store.connection.execute(
+                    "SELECT source_id FROM agent_action_audit WHERE action='answer'"
+                )
+            }
+        self.assertEqual(audited_sources, {self.source_id, second.source_id})
 
     def test_visual_neutral_chat_import_flow(self) -> None:
         chat = self.base / "neutral-chat.json"

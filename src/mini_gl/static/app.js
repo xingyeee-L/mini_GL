@@ -137,6 +137,9 @@ async function loadAll(keep = true) {
   allSources.textContent = "全部已授权数据源";
   byId("search-source").prepend(allSources);
   if (!keep || !previous.search) byId("search-source").value = "all";
+  const allAnswerSources = allSources.cloneNode(true);
+  byId("ask-source").prepend(allAnswerSources);
+  if (!keep || !previous.ask) byId("ask-source").value = "all";
 
   const entries = await Promise.all(sources.map(async (source) => {
     try { return [source.source_id, await api(`/api/source/${encodeURIComponent(source.source_id)}`)]; }
@@ -278,7 +281,8 @@ function citationCard(citation, sourceId, index) {
   const label = document.createElement("span"); label.className = "citation-index"; label.textContent = `来源 ${index + 1}`;
   const title = document.createElement("strong"); title.textContent = citation.title;
   const meta = document.createElement("p"); meta.textContent = `片段 ${citation.chunk_id.slice(0, 12)}… · 字符 ${citation.start_offset ?? 0}–${citation.end_offset ?? "末尾"}`;
-  const button = document.createElement("button"); button.textContent = "展开来源"; button.onclick = () => preview(sourceId, citation.document_id);
+  const citationSource = citation.source_id || sourceId;
+  const button = document.createElement("button"); button.textContent = "展开来源"; button.onclick = () => preview(citationSource, citation.document_id);
   card.append(label, title, meta, button); return card;
 }
 
@@ -379,6 +383,7 @@ async function diagnose() {
   try {
     const output = await api("/api/diagnostics");
     const ollama = output.ollama;
+    const embedding = output.embedding;
     container.replaceChildren(
       diagnosticItem("Python", output.python),
       diagnosticItem("SQLite", `${output.sqlite} · ${output.database_integrity}`, output.database_integrity === "ok"),
@@ -387,10 +392,16 @@ async function diagnose() {
       diagnosticItem("数据规模", `${output.documents} 文档 · ${output.vector_chunks} 向量片段`),
       diagnosticItem("数据库", `${Math.ceil(output.database_size / 1024)} KiB`)
     );
+    byId("bge-model-status").textContent = embedding.available ? "● 本地模型目录可用" : "! 未找到本地模型目录";
+    byId("qwen-model-status").textContent = ollama.model_available ? "● Ollama 与固定模型可用" : (ollama.reachable ? "! Ollama 已启动，但固定模型缺失" : "! Ollama 服务未运行");
+    byId("model-next-step").textContent = output.ready
+      ? "模型环境已就绪，可以同步资料并建立索引。"
+      : (!ollama.reachable ? "下一步：启动 Ollama，然后重新诊断。" : (!ollama.model_available ? "下一步：安装固定版本的 Qwen 模型。" : "下一步：确认 BGE 模型目录完整。"));
   } catch (error) { container.textContent = `诊断失败：${error.message}`; }
 }
 
 byId("diagnose").onclick = diagnose;
+byId("diagnose-models").onclick = diagnose;
 byId("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const status = byId("maintenance-status");
   try { const destination = new FormData(event.target).get("destination"); const output = await api("/api/backup", {method: "POST", body: JSON.stringify({destination})}); status.textContent = `备份完成：${output.path} · ${output.integrity} · SHA-256 ${output.sha256.slice(0, 12)}…`; }

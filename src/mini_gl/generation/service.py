@@ -41,23 +41,49 @@ class RAGService:
         file_type: str | None = None,
         updated_after: str | None = None,
     ) -> GroundedAnswer:
+        return self.answer_sources(
+            query,
+            (source_id,),
+            limit=limit,
+            file_type=file_type,
+            updated_after=updated_after,
+        )
+
+    def answer_sources(
+        self,
+        query: str,
+        source_ids: tuple[str, ...],
+        *,
+        limit: int = 10,
+        file_type: str | None = None,
+        updated_after: str | None = None,
+    ) -> GroundedAnswer:
+        """Answer from a bounded union of sources authorized by the caller."""
         question = normalize_query(query)
         if not question:
             raise ValueError("Question must not be empty")
+        unique_sources = tuple(dict.fromkeys(source_ids))
+        if not unique_sources:
+            raise ValueError("At least one authorized source is required")
+        bounded_limit = max(1, min(limit, 50))
         retrieval_started = time.perf_counter()
         ranked = [
             row
+            for source_id in unique_sources
             for row in self.retrieval.search(
                 question,
                 source_id,
-                limit,
+                bounded_limit,
                 file_type=file_type,
                 updated_after=updated_after,
             )
             if "lexical_rank" in row
             or _number(row.get("vector_score", 0.0)) >= self.min_vector_score
         ]
-        bundle = self.context.build(source_id, ranked)
+        ranked.sort(
+            key=lambda row: (-_ranking_score(row), str(row.get("chunk_id", "")))
+        )
+        bundle = self.context.build_many(unique_sources, ranked[:bounded_limit])
         retrieval_ms = _elapsed(retrieval_started)
         if not bundle.citations:
             return GroundedAnswer(
@@ -97,6 +123,10 @@ def _elapsed(started: float) -> float:
 
 def _number(value: object) -> float:
     return float(value) if isinstance(value, (int, float)) else 0.0
+
+
+def _ranking_score(row: dict[str, object]) -> float:
+    return _number(row.get("final_score", row.get("fusion_score", 0.0)))
 
 
 def _citations_are_valid(answer: str, count: int) -> bool:

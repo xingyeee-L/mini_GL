@@ -85,6 +85,8 @@ el('ask-form').addEventListener('submit',async e=>{e.preventDefault();const stat
 
 
 class AcceptanceServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+    allow_reuse_port = False
     db_path: Path
     csrf_token: str
     embedding_provider: EmbeddingProvider | None
@@ -314,7 +316,7 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 elif self.path == "/api/ask":
                     source_id = str(body["source_id"])
-                    self._authorize_read(store, Action.ANSWER, source_id)
+                    source_ids = self._authorize_sources(store, Action.ANSWER, source_id)
                     provider = self._embedding()
                     retrieval = HybridSearchService(
                         LexicalSearchService(store),
@@ -323,9 +325,9 @@ class Handler(BaseHTTPRequestHandler):
                     )
                     answer = RAGService(
                         retrieval, ContextBuilder(store), self.server.chat_model
-                    ).answer(
+                    ).answer_sources(
                         str(body.get("query", "")),
-                        source_id,
+                        tuple(source_ids),
                         file_type=(str(body["file_type"]) if body.get("file_type") else None),
                     )
                     self._json(asdict(answer))
