@@ -7,10 +7,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests._common_file_fixtures import write_pdf, write_pptx, write_xlsx
 from tests._docx_fixture import write_docx
 
 from mini_gl.connectors.base import ChangeKind
-from mini_gl.ingestion import IngestionService
+from mini_gl.ingestion import DEFAULT_EXTENSIONS, IngestionService
 from mini_gl.parsers.docx import DocxParseError
 from mini_gl.parsers.text import TextParseError
 from mini_gl.storage.sqlite import SQLiteStore
@@ -111,7 +112,52 @@ class IngestionTests(unittest.TestCase):
             {"created": 0, "updated": 0, "unchanged": 0, "deleted": 1},
         )
 
-    def test_explicit_reregistration_adds_docx_without_widening_limits(self) -> None:
+    def test_common_formats_share_the_atomic_source_pipeline(self) -> None:
+        write_xlsx(self.root / "plan.xlsx")
+        write_pptx(self.root / "briefing.pptx")
+        write_pdf(self.root / "report.pdf")
+        (self.root / "table.csv").write_text(
+            "topic,value\nfictional csv decision,42", encoding="utf-8"
+        )
+        (self.root / "page.html").write_text(
+            "<h1>fictional HTML decision</h1>", encoding="utf-8"
+        )
+        (self.root / "config.toml").write_text(
+            'decision = "fictional config"', encoding="utf-8"
+        )
+        originals = {
+            path.name: self._fingerprint(path)
+            for path in self.root.iterdir()
+            if path.is_file()
+        }
+
+        source = self.service.register(self.root)
+        self.assertEqual(
+            self.service.sync(source.source_id),
+            {"created": 6, "updated": 0, "unchanged": 0, "deleted": 0},
+        )
+        rows = self.store.connection.execute(
+            "SELECT title,content,metadata_json FROM documents ORDER BY title"
+        ).fetchall()
+        parsers = {
+            row["title"]: json.loads(row["metadata_json"])["parser"] for row in rows
+        }
+        self.assertEqual(parsers["plan.xlsx"], "xlsx-ooxml-v1")
+        self.assertEqual(parsers["briefing.pptx"], "pptx-ooxml-v1")
+        self.assertEqual(parsers["report.pdf"], "pdf-pypdf-v1")
+        self.assertTrue(any("fictional pdf decision" in row["content"] for row in rows))
+        self.assertEqual(
+            originals,
+            {
+                path.name: self._fingerprint(path)
+                for path in self.root.iterdir()
+                if path.is_file()
+            },
+        )
+
+    def test_explicit_reregistration_adds_supported_formats_without_widening_limits(
+        self,
+    ) -> None:
         old = self.store.register_source(
             self.root, 1_024, 2, frozenset({".txt", ".md"})
         )
@@ -119,7 +165,7 @@ class IngestionTests(unittest.TestCase):
         upgraded = self.service.register(self.root)
 
         self.assertEqual(upgraded.source_id, old.source_id)
-        self.assertEqual(upgraded.allowed_extensions, frozenset({".txt", ".md", ".docx"}))
+        self.assertEqual(upgraded.allowed_extensions, DEFAULT_EXTENSIONS)
         self.assertEqual(upgraded.max_file_size, 1_024)
         self.assertEqual(upgraded.max_depth, 2)
 

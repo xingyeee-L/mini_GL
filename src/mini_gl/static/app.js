@@ -333,7 +333,7 @@ byId("refresh").onclick = () => loadAll();
 
 byId("register").addEventListener("submit", async (event) => {
   event.preventDefault();
-  try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("TXT、Markdown 与安全 DOCX 已授权，可以开始只读同步"); }
+  try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("常用文档格式已授权，可以开始只读同步"); }
   catch (error) { showToast(error.message, true); }
 });
 
@@ -384,9 +384,11 @@ async function diagnose() {
     const output = await api("/api/diagnostics");
     const ollama = output.ollama;
     const embedding = output.embedding;
+    const formats = output.document_formats;
     container.replaceChildren(
       diagnosticItem("Python", output.python),
       diagnosticItem("SQLite", `${output.sqlite} · ${output.database_integrity}`, output.database_integrity === "ok"),
+      diagnosticItem("常用文件解析", formats.available ? `Office/文本内置 · PDF ${formats.pdf}` : "PDF 依赖缺失", formats.available),
       diagnosticItem("本地模型服务", ollama.reachable ? "Ollama 已连接" : "Ollama 未运行", ollama.reachable),
       diagnosticItem("Qwen 模型", ollama.model_available ? "已安装" : "未检测到固定模型", ollama.model_available),
       diagnosticItem("数据规模", `${output.documents} 文档 · ${output.vector_chunks} 向量片段`),

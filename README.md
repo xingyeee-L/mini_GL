@@ -9,7 +9,7 @@ Phases 0–8 and the first product-facing frontend are complete. The default bro
 ## Phase 1 status
 
 - Explicit local source roots can be registered through the CLI.
-- TXT, Markdown, and security-reviewed DOCX are scanned through extension, size, depth, and path-boundary policies.
+- Common text, PDF, DOCX, XLSX, and PPTX files are scanned through extension, size, depth, and path-boundary policies.
 - Symbolic links and Windows reparse points fail closed.
 - UTF-8, BOM-marked UTF-16, and GB18030 content is normalized into `SourceDocument`.
 - SQLite stores sources, sync runs, file snapshots, documents, and idempotent change events.
@@ -90,14 +90,17 @@ python -m mini_gl desktop
 The desktop workspace adds local runtime diagnostics, explicit real-folder authorization,
 cross-source search and grounded Q&A, plus verified backup/restore-to-new-path controls. Every
 cross-source read is authorized and audited per source, and citations retain their source ID.
-DOCX extraction is dependency-free and bounded: it rejects unsafe package paths, XML entities,
-compression bombs, macros, ActiveX, and embedded objects, and never follows external links.
-PDF, legacy DOC, and other Office formats remain blocked pending separate security review.
+DOCX, XLSX, and PPTX extraction is dependency-free and bounded: it rejects unsafe package paths,
+XML entities, compression bombs, macros, ActiveX, and embedded objects, and never follows external
+links. PDF extraction uses the pinned pure-Python `pypdf` dependency and rejects encryption,
+JavaScript, launch actions, document-level actions, and embedded attachments.
 
-Use **Console → Data & Index → Choose folder** to select a real TXT/Markdown/DOCX folder with the
-native Windows dialog. Selection only fills the path; registration still requires explicit
-authorization, and document contents are read only after the user starts a read-only sync.
-Existing sources must be explicitly re-registered before DOCX is added to their allowlist.
+Use **Console → Data & Index → Choose folder** to select a real document folder with the native
+Windows dialog. Selection only fills the path; registration still requires explicit authorization,
+and document contents are read only after the user starts a read-only sync. Supported formats cover
+PDF, DOCX, XLSX, PPTX, common text/markup/configuration files, CSV/TSV, JSON, and common source code.
+Existing sources must be explicitly re-registered before newly supported formats are added to their
+allowlist. Legacy binary Office files, macro documents, archives, media, and OCR remain blocked.
 
 Development dependencies are declared in `pyproject.toml`, but Phase 0 verification intentionally works with the Python standard library.
 

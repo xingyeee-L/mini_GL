@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import http.client
+import importlib.metadata
 import json
 import platform
 import sqlite3
@@ -52,6 +53,16 @@ def runtime_diagnostics(store: SQLiteStore, database: Path) -> dict[str, object]
         "model": "BAAI/bge-small-zh-v1.5",
         "path": str(embedding_path),
     }
+    try:
+        pdf_version = importlib.metadata.version("pypdf")
+    except importlib.metadata.PackageNotFoundError:
+        pdf_version = None
+    document_formats = {
+        "office_ooxml": "built-in",
+        "structured_text": "built-in",
+        "pdf": pdf_version,
+        "available": pdf_version is not None,
+    }
     return {
         "python": platform.python_version(),
         "sqlite": sqlite3.sqlite_version,
@@ -63,11 +74,13 @@ def runtime_diagnostics(store: SQLiteStore, database: Path) -> dict[str, object]
         "vector_chunks": vector_count,
         "ollama": model,
         "embedding": embedding,
+        "document_formats": document_formats,
         "ready": (
             integrity == "ok"
             and bool(model["reachable"])
             and bool(model["model_available"])
             and bool(embedding["available"])
+            and bool(document_formats["available"])
         ),
     }
 

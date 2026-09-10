@@ -10,7 +10,9 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary - educational project" }
 authors = [{ name = "mini_GL contributors" }]
-dependencies = []
+dependencies = [
+  "pypdf>=6,<7",
+]
 
 [project.optional-dependencies]
 dev = [

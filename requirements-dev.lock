@@ -3,5 +3,6 @@ librt==0.15.0
 mypy==2.3.1
 mypy_extensions==1.1.0
 pathspec==1.1.1
+pypdf==6.18.0
 ruff==0.16.6
 typing_extensions==4.16.0

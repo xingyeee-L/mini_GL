@@ -2,9 +2,10 @@
 
 ## Dependency boundary
 
-The core application keeps an empty runtime dependency list and uses the Python standard library
-for ingestion, SQLite, the loopback HTTP server, and local-model transport. Development tooling is
-pinned in `requirements-dev.lock`. The optional offline embedding stack is pinned in
+The core application uses the Python standard library for path handling, SQLite, the loopback HTTP
+server, Office Open XML parsing, and local-model transport. PDF text extraction adds one pure-Python
+runtime dependency, `pypdf`, pinned in `requirements-runtime.lock`. Development tooling is pinned
+in `requirements-dev.lock`. The optional offline embedding stack is pinned in
 `requirements-ml.lock`; it is not required for keyword-only operation.
 
 Installation may contact package indexes and model registries, but normal application operation

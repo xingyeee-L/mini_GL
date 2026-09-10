@@ -1,0 +1,2 @@
+# Exact local document parsing runtime verified on Windows Python 3.14 on 2026-09-10.
+pypdf==6.18.0

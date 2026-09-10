@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from tests._common_file_fixtures import write_pdf, write_xlsx
 from tests._docx_fixture import write_docx
 
 from mini_gl.generation.models import ChatResponse
@@ -77,6 +78,9 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn('id="register-root"', page)
         self.assertIn("首次运行检查", page)
         self.assertIn("Word DOCX", page)
+        self.assertIn("PDF", page)
+        self.assertIn("Excel XLSX", page)
+        self.assertIn("PowerPoint PPTX", page)
         self.assertIn('/assets/app.css', page)
         self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
@@ -147,12 +151,50 @@ class WebAcceptanceTests(unittest.TestCase):
             hashlib.sha256(document.read_bytes()).hexdigest(), original_hash
         )
 
+    def test_visual_pdf_and_xlsx_sync_index_and_filter_flow(self) -> None:
+        root = self.base / "common-files-source"
+        root.mkdir()
+        pdf = root / "fictional-report.pdf"
+        xlsx = root / "fictional-plan.xlsx"
+        write_pdf(pdf)
+        write_xlsx(xlsx)
+        originals = {
+            path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+            for path in root.iterdir()
+        }
+        registered = self._post_json(
+            "/api/register", {"root": str(root), "authorized": True}
+        )
+        source_id = str(registered["source_id"])
+
+        synced = self._post_json("/api/sync", {"source_id": source_id})
+        self.assertEqual(synced["created"], 2)
+        self._post_json("/api/index", {"source_id": source_id})
+        pdf_result = self._get_json(
+            f"/api/search?source_id={source_id}&q=fictional%20pdf&file_type=.pdf"
+        )
+        xlsx_result = self._get_json(
+            f"/api/search?source_id={source_id}&q=spreadsheet%20decision&file_type=.xlsx"
+        )
+
+        self.assertEqual(pdf_result["results"][0]["title"], pdf.name)
+        self.assertEqual(xlsx_result["results"][0]["title"], xlsx.name)
+        self.assertEqual(
+            originals,
+            {
+                path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in root.iterdir()
+            },
+        )
+
     def test_runtime_diagnostics_and_visual_backup_restore(self) -> None:
         diagnostics = self._get_json("/api/diagnostics")
         self.assertEqual(diagnostics["database_integrity"], "ok")
         self.assertEqual(diagnostics["sources"], 1)
         self.assertIn("reachable", diagnostics["ollama"])
         self.assertIn("available", diagnostics["embedding"])
+        self.assertTrue(diagnostics["document_formats"]["available"])
+        self.assertEqual(diagnostics["document_formats"]["office_ooxml"], "built-in")
 
         backup = self.base / "backup.sqlite3"
         backup_result = self._post_json(
