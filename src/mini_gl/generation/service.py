@@ -221,11 +221,36 @@ def _grounding_diagnostics(
             continue
         markers = _citation_markers(sentence)
         claim = re.sub(r"\[来源\s*\d+\]", "", sentence)
+        entities = _claim_entities(claim)
+        valid_markers = [marker for marker in markers if 1 <= marker <= len(evidence)]
+        source_passages = [evidence[marker - 1] for marker in valid_markers]
+        focused_passages, missing_entities = _focus_entity_evidence(
+            entities, source_passages
+        )
+        claimed_attributes = _technical_attributes(claim)
+        source_attributes = _technical_attributes("\n".join(focused_passages))
+        if missing_entities or not claimed_attributes.issubset(source_attributes):
+            unit_results.append(
+                {
+                    "text": sentence,
+                    "kind": "claim",
+                    "markers": markers,
+                    "entities": entities,
+                    "lexical_overlap": 0.0,
+                    "semantic_similarity": None,
+                    "supported": False,
+                    "reason": (
+                        "entity_not_in_cited_source"
+                        if missing_entities
+                        else "entity_attribute_mismatch"
+                    ),
+                }
+            )
+            continue
         claim_terms = {term for term in tokenize(claim) if len(term) > 1 or term.isascii()}
         source_terms: set[str] = set()
-        valid_markers = [marker for marker in markers if 1 <= marker <= len(evidence)]
-        for marker in valid_markers:
-            source_terms.update(tokenize(evidence[marker - 1]))
+        for passage in focused_passages:
+            source_terms.update(tokenize(passage))
         lexical_overlap = (
             len(claim_terms & source_terms) / len(claim_terms) if claim_terms else 0.0
         )
@@ -256,9 +281,7 @@ def _grounding_diagnostics(
             continue
         semantic_claim = f"{question} {claim}" if len(claim_terms) <= 6 else claim
         claim_vector = provider.embed_query(semantic_claim)
-        source_vectors = provider.embed_documents(
-            [evidence[marker - 1] for marker in valid_markers]
-        )
+        source_vectors = provider.embed_documents(focused_passages)
         similarity = max(
             sum(left * right for left, right in zip(claim_vector, vector, strict=True))
             for vector in source_vectors
@@ -297,6 +320,54 @@ def _grounding_diagnostics(
 def _citation_markers(text: str) -> list[int]:
     """Accept the harmless spacing variants commonly emitted by small local LLMs."""
     return [int(value) for value in re.findall(r"\[来源\s*(\d+)\]", text)]
+
+
+def _claim_entities(text: str) -> list[str]:
+    links = re.findall(r"\[([^\]]+)\]\\?\([^)]+\)", text)
+    identifiers = re.findall(r"\b[A-Za-z]{2,}[ -]?\d{2,}[A-Za-z-]*\b", text)
+    return list(dict.fromkeys(value.strip() for value in [*links, *identifiers] if value.strip()))
+
+
+def _focus_entity_evidence(
+    entities: list[str], passages: list[str], *, radius: int = 280
+) -> tuple[list[str], list[str]]:
+    if not entities:
+        return passages, []
+    windows: list[str] = []
+    missing: list[str] = []
+    for entity in entities:
+        normalized = entity.casefold().replace(" ", "").replace("-", "")
+        found = False
+        for passage in passages:
+            searchable = passage.casefold().replace(" ", "").replace("-", "")
+            position = searchable.find(normalized)
+            if position < 0:
+                continue
+            found = True
+            start = max(0, position - radius)
+            windows.append(passage[start : position + len(entity) + radius])
+        if not found:
+            missing.append(entity)
+    return (windows or passages), missing
+
+
+_ATTRIBUTE_PATTERNS = {
+    "python": r"\bpython\b",
+    "c": r"(?<![a-z0-9+#.])c(?:\s*语言)?(?![a-z0-9+#.])",
+    "cpp": r"\bc\+\+\b|\bcpp\b",
+    "rust": r"\brust\b",
+    "ocaml": r"\bocaml\b",
+    "scheme": r"\bscheme\b",
+    "java": r"\bjava\b",
+    "csharp": r"\bc#\b|\bcsharp\b",
+}
+
+
+def _technical_attributes(text: str) -> set[str]:
+    lowered = text.casefold()
+    return {
+        name for name, pattern in _ATTRIBUTE_PATTERNS.items() if re.search(pattern, lowered)
+    }
 
 
 def _supported_portion(validation: dict[str, object]) -> str | None:

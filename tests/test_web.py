@@ -365,6 +365,23 @@ class WebAcceptanceTests(unittest.TestCase):
         history = self._get_json(f"/api/qa-session/{session_id}")
         self.assertEqual(len(history["turns"]), 2)
 
+        citation = result["citations"][0]
+        feedback = self._post_json(
+            "/api/citation-feedback",
+            {
+                "session_id": session_id,
+                "source_id": citation["source_id"],
+                "document_id": citation["document_id"],
+                "chunk_id": citation["chunk_id"],
+                "verdict": "incorrect",
+            },
+        )
+        self.assertEqual(feedback["verdict"], "incorrect")
+        with SQLiteStore(self.db) as store:
+            self.assertEqual(
+                store.citation_feedback_summary(), {"correct": 0, "incorrect": 1}
+            )
+
         with self.assertRaises(HTTPError) as caught:
             self._post_json(
                 "/api/delete-qa-session",

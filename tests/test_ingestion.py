@@ -430,7 +430,7 @@ class IngestionTests(unittest.TestCase):
         self.store = SQLiteStore(self.db)
         self.service = IngestionService(self.store)
         self.assertEqual(
-            self.store.connection.execute("PRAGMA user_version").fetchone()[0], 11
+            self.store.connection.execute("PRAGMA user_version").fetchone()[0], 13
         )
 
     @staticmethod

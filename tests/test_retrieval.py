@@ -57,6 +57,19 @@ class LexicalRetrievalTests(unittest.TestCase):
         )
         self.assertTrue(all(row["file_type"] == ".md" for row in markdown["results"]))
 
+    def test_markdown_chunks_preserve_section_path_and_exact_offsets(self) -> None:
+        result = self.search.search("拒绝符号链接", source_id=self.source.source_id)
+        row = result["results"][0]
+        self.assertEqual(row["section_path"], "安全设计")
+        document = self.store.connection.execute(
+            "SELECT content FROM documents WHERE document_id=?", (row["document_id"],)
+        ).fetchone()
+        extracted = document["content"][row["start_offset"] : row["end_offset"]]
+        chunk = self.store.connection.execute(
+            "SELECT content FROM lexical_chunks WHERE chunk_id=?", (row["chunk_id"],)
+        ).fetchone()
+        self.assertEqual(extracted, chunk["content"])
+
     def test_source_scope_prevents_cross_source_results(self) -> None:
         other = self.base / "other"
         other.mkdir()

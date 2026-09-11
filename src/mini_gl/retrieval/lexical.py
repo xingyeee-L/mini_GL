@@ -42,23 +42,57 @@ def tokenize(text: str) -> list[str]:
     return tokens
 
 
-def split_chunks(content: str, limit: int = 900) -> list[str]:
-    """Split on paragraphs while keeping deterministic bounded chunks."""
-    paragraphs = [part.strip() for part in re.split(r"\n\s*\n", content) if part.strip()]
-    chunks: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        for start in range(0, max(1, len(paragraph)), limit):
-            part = paragraph[start : start + limit]
-            candidate = f"{current}\n\n{part}" if current else part
-            if current and len(candidate) > limit:
-                chunks.append(current)
-                current = part
-            else:
-                current = candidate
-    if current:
-        chunks.append(current)
+@dataclass(frozen=True, slots=True)
+class StructuredChunk:
+    content: str
+    section_path: str
+    start_offset: int
+    end_offset: int
+
+
+def split_structured_chunks(
+    content: str, *, file_type: str = "", limit: int = 900
+) -> list[StructuredChunk]:
+    """Split paragraphs while preserving Markdown heading ancestry and offsets."""
+    heading_stack: list[str] = []
+    chunks: list[StructuredChunk] = []
+    scan_content = content.rstrip()
+    blocks = list(
+        re.finditer(
+            r"\S(?:.*?\S)?(?=\r?\n[ \t]*\r?\n|\Z)", scan_content, re.DOTALL
+        )
+    )
+    for block in blocks:
+        raw = block.group(0)
+        heading = (
+            re.fullmatch(r"\s*(#{1,6})\s+(.+?)\s*", raw)
+            if file_type in {".md", ".markdown"}
+            else None
+        )
+        if heading:
+            level = len(heading.group(1))
+            heading_stack[level - 1 :] = [heading.group(2).strip()]
+            continue
+        section_path = " › ".join(heading_stack)
+        stripped = raw.strip()
+        leading = len(raw) - len(raw.lstrip())
+        absolute_start = block.start() + leading
+        for offset in range(0, len(stripped), limit):
+            part = stripped[offset : offset + limit]
+            chunks.append(
+                StructuredChunk(
+                    part,
+                    section_path,
+                    absolute_start + offset,
+                    absolute_start + offset + len(part),
+                )
+            )
     return chunks
+
+
+def split_chunks(content: str, limit: int = 900) -> list[str]:
+    """Compatibility wrapper returning only chunk text."""
+    return [chunk.content for chunk in split_structured_chunks(content, limit=limit)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +104,9 @@ class SearchResult:
     source_uri: str
     file_type: str
     updated_at: str | None
+    section_path: str
+    start_offset: int
+    end_offset: int
     snippet: str
     score: float
 
@@ -88,7 +125,11 @@ class LexicalSearchService:
                     "DELETE FROM lexical_chunks WHERE source_id=?", (source_id,)
                 )
             self.store.connection.executemany(
-                "INSERT INTO lexical_chunks VALUES(?,?,?,?,?,?,?,?,?,?,?)", rows
+                """INSERT INTO lexical_chunks(
+                chunk_id,document_id,source_id,ordinal,source_uri,title,file_type,
+                updated_at,content,terms_json,token_count,section_path,start_offset,end_offset
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                rows,
             )
         return {"documents": document_count, "chunks": len(rows)}
 
@@ -110,11 +151,16 @@ class LexicalSearchService:
                 "DELETE FROM lexical_chunks WHERE chunk_id=?", ((item,) for item in deleted)
             )
             self.store.connection.executemany(
-                """INSERT INTO lexical_chunks VALUES(?,?,?,?,?,?,?,?,?,?,?)
+                """INSERT INTO lexical_chunks(
+                chunk_id,document_id,source_id,ordinal,source_uri,title,file_type,
+                updated_at,content,terms_json,token_count,section_path,start_offset,end_offset
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(chunk_id) DO UPDATE SET
                 source_uri=excluded.source_uri,title=excluded.title,file_type=excluded.file_type,
                 updated_at=excluded.updated_at,content=excluded.content,
-                terms_json=excluded.terms_json,token_count=excluded.token_count""",
+                terms_json=excluded.terms_json,token_count=excluded.token_count,
+                section_path=excluded.section_path,start_offset=excluded.start_offset,
+                end_offset=excluded.end_offset""",
                 current.values(),
             )
         return {
@@ -138,12 +184,23 @@ class LexicalSearchService:
             ).fetchall()
         rows: list[tuple[object, ...]] = []
         for document in documents:
-            for ordinal, content in enumerate(split_chunks(document["content"])):
+            file_type = Path(document["source_uri"]).suffix.lower()
+            for ordinal, chunk in enumerate(
+                split_structured_chunks(document["content"], file_type=file_type)
+            ):
+                content = chunk.content
                 content_hash = hashlib.sha256(content.encode()).hexdigest()
                 identity = f"{document['document_id']}\0{ordinal}\0{content_hash}"
                 chunk_id = hashlib.sha256(identity.encode()).hexdigest()
                 title_terms = tokenize(document["title"])
-                terms = [*title_terms, *title_terms, *tokenize(content)]
+                section_terms = tokenize(chunk.section_path)
+                terms = [
+                    *title_terms,
+                    *title_terms,
+                    *section_terms,
+                    *section_terms,
+                    *tokenize(content),
+                ]
                 rows.append(
                     (
                         chunk_id,
@@ -152,11 +209,14 @@ class LexicalSearchService:
                         ordinal,
                         document["source_uri"],
                         document["title"],
-                        Path(document["source_uri"]).suffix.lower(),
+                        file_type,
                         document["updated_at"],
                         content,
                         json.dumps(Counter(terms), ensure_ascii=False, sort_keys=True),
                         len(terms),
+                        chunk.section_path,
+                        chunk.start_offset,
+                        chunk.end_offset,
                     )
                 )
         return rows, len(documents)
@@ -198,7 +258,7 @@ class LexicalSearchService:
         for row, frequencies_for_row in zip(rows, frequencies, strict=True):
             if _weighted_coverage(
                 query_terms, frequencies_for_row, document_frequency, len(rows)
-            ) < 0.12:
+            ) < 0.08:
                 continue
             score = _bm25(
                 query_terms,
@@ -219,6 +279,9 @@ class LexicalSearchService:
                     source_uri=row["source_uri"],
                     file_type=row["file_type"],
                     updated_at=row["updated_at"],
+                    section_path=row["section_path"],
+                    start_offset=row["start_offset"],
+                    end_offset=row["end_offset"],
                     snippet=_snippet(row["content"], query),
                     score=round(score, 6),
                 )
@@ -257,7 +320,11 @@ def _weighted_coverage(
     document_frequency: dict[str, int],
     count: int,
 ) -> float:
-    informative = [term for term in query if len(term) > 1 or term.isascii()]
+    # Whole unsegmented Chinese runs are brittle for paraphrases; coverage should
+    # be decided by stable bigrams while exact long runs can still boost BM25.
+    informative = [
+        term for term in query if term.isascii() or len(term) == 2
+    ]
     if not informative:
         informative = list(query)
     weights = {

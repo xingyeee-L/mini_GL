@@ -377,10 +377,34 @@ function citationCard(citation, sourceId, index) {
   card.className = "citation";
   const label = document.createElement("span"); label.className = "citation-index"; label.textContent = `来源 ${index + 1}`;
   const title = document.createElement("strong"); title.textContent = citation.title;
-  const meta = document.createElement("p"); meta.textContent = `片段 ${citation.chunk_id.slice(0, 12)}… · 字符 ${citation.start_offset ?? 0}–${citation.end_offset ?? "末尾"}`;
+  const meta = document.createElement("p"); meta.textContent = `${citation.section_path ? `章节 ${citation.section_path} · ` : ""}片段 ${citation.chunk_id.slice(0, 12)}… · 字符 ${citation.start_offset ?? 0}–${citation.end_offset ?? "末尾"}`;
   const citationSource = citation.source_id || sourceId;
+  const actions = document.createElement("div"); actions.className = "citation-actions";
   const button = document.createElement("button"); button.textContent = "展开来源"; button.onclick = () => preview(citationSource, citation.document_id);
-  card.append(label, title, meta, button); return card;
+  const correct = document.createElement("button"); correct.textContent = "✓ 引用正确"; correct.title = "记录为正确引用";
+  const incorrect = document.createElement("button"); incorrect.textContent = "引用错误"; incorrect.title = "加入本地回归样本";
+  correct.onclick = () => submitCitationFeedback(citation, citationSource, "correct", correct, incorrect).catch((error) => showToast(error.message, true));
+  incorrect.onclick = () => submitCitationFeedback(citation, citationSource, "incorrect", incorrect, correct).catch((error) => showToast(error.message, true));
+  actions.append(button, correct, incorrect);
+  card.append(label, title, meta, actions); return card;
+}
+
+async function submitCitationFeedback(citation, sourceId, verdict, selected, other) {
+  if (!currentQaSessionId) throw new Error("请先完成一次问答再评价引用");
+  setButtonBusy(selected, true, "记录中…");
+  try {
+    await api("/api/citation-feedback", {method: "POST", body: JSON.stringify({
+      session_id: currentQaSessionId,
+      source_id: sourceId,
+      document_id: citation.document_id,
+      chunk_id: citation.chunk_id,
+      verdict,
+    })});
+    selected.classList.add("selected"); other.classList.remove("selected");
+    showToast(verdict === "correct" ? "已记录为正确引用" : "已加入本地错误回归样本");
+  } finally {
+    setButtonBusy(selected, false);
+  }
 }
 
 const QA_SESSION_KEY = "mini_gl.active_qa_session";

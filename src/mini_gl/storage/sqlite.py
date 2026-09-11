@@ -65,7 +65,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 11:
+        if version > 13:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -395,6 +395,50 @@ class SQLiteStore:
                 """
             )
             self.connection.commit()
+            version = 11
+        if version == 11:
+            columns = {
+                str(row["name"])
+                for row in self.connection.execute(
+                    "PRAGMA table_info(lexical_chunks)"
+                ).fetchall()
+            }
+            additions = (
+                ("section_path", "TEXT NOT NULL DEFAULT ''"),
+                ("start_offset", "INTEGER NOT NULL DEFAULT 0"),
+                ("end_offset", "INTEGER NOT NULL DEFAULT 0"),
+            )
+            for name, declaration in additions:
+                if name not in columns:
+                    self.connection.execute(
+                        f"ALTER TABLE lexical_chunks ADD COLUMN {name} {declaration}"
+                    )
+            # Chunk boundaries are derived data.  Older rows cannot be assigned
+            # trustworthy offsets after the fact, so require a clean rebuild.
+            self.connection.execute("DELETE FROM lexical_chunks")
+            self.connection.execute("PRAGMA user_version = 12")
+            self.connection.commit()
+            version = 12
+        if version == 12:
+            self.connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS citation_feedback (
+                    feedback_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL
+                        REFERENCES qa_sessions(session_id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL REFERENCES sources(source_id) ON DELETE CASCADE,
+                    document_id TEXT NOT NULL REFERENCES documents(document_id) ON DELETE CASCADE,
+                    chunk_id TEXT NOT NULL REFERENCES lexical_chunks(chunk_id) ON DELETE CASCADE,
+                    verdict TEXT NOT NULL CHECK(verdict IN ('correct','incorrect')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(session_id, chunk_id)
+                );
+                CREATE INDEX IF NOT EXISTS citation_feedback_verdict_idx
+                    ON citation_feedback(verdict, created_at);
+                PRAGMA user_version = 13;
+                """
+            )
+            self.connection.commit()
 
     def record_agent_decision(
         self,
@@ -570,6 +614,59 @@ class SQLiteStore:
         with self.connection:
             self.connection.execute("DELETE FROM qa_sessions")
         return {"sessions": session_count, "turns": turn_count}
+
+    def record_citation_feedback(
+        self,
+        *,
+        session_id: str,
+        source_id: str,
+        document_id: str,
+        chunk_id: str,
+        verdict: str,
+    ) -> dict[str, str]:
+        """Store a local citation judgment as a privacy-safe regression signal."""
+        if verdict not in {"correct", "incorrect"}:
+            raise ValueError("Citation verdict must be correct or incorrect")
+        session = self.get_qa_session(session_id)
+        normalized_session = str(session["session_id"])
+        row = self.connection.execute(
+            "SELECT 1 FROM lexical_chunks WHERE source_id=? AND document_id=? AND chunk_id=?",
+            (source_id, document_id, chunk_id),
+        ).fetchone()
+        if row is None:
+            raise ValueError("Citation does not belong to the selected source document")
+        feedback_id = hashlib.sha256(
+            f"{normalized_session}\0{chunk_id}".encode()
+        ).hexdigest()
+        created_at = utc_now()
+        with self.connection:
+            self.connection.execute(
+                """INSERT INTO citation_feedback VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(session_id,chunk_id) DO UPDATE SET
+                verdict=excluded.verdict,created_at=excluded.created_at""",
+                (
+                    feedback_id,
+                    normalized_session,
+                    source_id,
+                    document_id,
+                    chunk_id,
+                    verdict,
+                    created_at,
+                ),
+            )
+        return {
+            "feedback_id": feedback_id,
+            "session_id": normalized_session,
+            "verdict": verdict,
+        }
+
+    def citation_feedback_summary(self) -> dict[str, int]:
+        rows = self.connection.execute(
+            "SELECT verdict,COUNT(*) AS count FROM citation_feedback GROUP BY verdict"
+        ).fetchall()
+        counts = {"correct": 0, "incorrect": 0}
+        counts.update({str(row["verdict"]): int(row["count"]) for row in rows})
+        return counts
 
     def set_source_schedule(
         self,

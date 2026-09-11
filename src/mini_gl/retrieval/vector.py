@@ -19,6 +19,9 @@ class VectorResult:
     source_uri: str
     file_type: str
     updated_at: str | None
+    section_path: str
+    start_offset: int
+    end_offset: int
     snippet: str
     score: float
 
@@ -152,6 +155,9 @@ class VectorSearchService:
                         source_uri=row["source_uri"],
                         file_type=row["file_type"],
                         updated_at=row["updated_at"],
+                        section_path=row["section_path"],
+                        start_offset=row["start_offset"],
+                        end_offset=row["end_offset"],
                         snippet=row["content"][:180].replace("\n", " "),
                         score=round(score, 6),
                     )

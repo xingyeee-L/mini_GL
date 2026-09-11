@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol, cast
 
 from mini_gl.retrieval.lexical import LexicalSearchService, tokenize
@@ -15,16 +16,37 @@ class Reranker(Protocol):
 
 
 class TokenOverlapReranker:
-    name = "token-overlap-v1"
+    name = "entity-aware-local-v2"
 
     def rerank(self, query: str, results: list[dict[str, object]]) -> list[dict[str, object]]:
         query_terms = set(tokenize(query))
+        identifiers = {
+            value.casefold()
+            for value in re.findall(r"\b(?:[A-Za-z]{2,}\s*)?\d{2,}[A-Za-z-]*\b", query)
+        }
+        ascii_terms = {
+            value.casefold()
+            for value in re.findall(r"\b[A-Za-z][A-Za-z0-9+#.-]{2,}\b", query)
+        }
         for result in results:
-            text = f"{result['title']} {result['snippet']}"
+            title = str(result["title"])
+            section = str(result.get("section_path", ""))
+            text = f"{title} {section} {result['snippet']}"
             overlap = len(query_terms & set(tokenize(text))) / max(1, len(query_terms))
+            normalized_title = title.casefold().replace("_", "").replace("-", "")
+            identifier_hits = sum(
+                identifier.replace(" ", "").replace("-", "") in normalized_title
+                for identifier in identifiers
+            )
+            exact_term_hits = sum(term in text.casefold() for term in ascii_terms)
             result["rerank_score"] = round(overlap, 6)
+            result["entity_exact_hits"] = identifier_hits
+            result["exact_term_hits"] = exact_term_hits
             result["final_score"] = round(
-                _number(result["fusion_score"]) + overlap * 0.001,
+                _number(result["fusion_score"])
+                + overlap * 0.004
+                + identifier_hits * 0.02
+                + exact_term_hits * 0.015,
                 8,
             )
         return sorted(

@@ -4,7 +4,7 @@ mini_GL is a local-first personal knowledge retrieval and question-answering pro
 
 ## Current status
 
-Phases 0–8 and the first product-facing frontend are complete. The default browser experience now contains a home page, unified search, grounded Q&A, a knowledge library, and an administrative console. Real QQ/WeChat data remains deliberately gated; only fictional fixtures and the provider-neutral chat contract are supported during development.
+Phases 0–8 and the first product-facing frontend are complete. Phase 9 desktop readiness is in progress, and Phase 10 adds structure-aware chunks, exact citation locations, entity-aware grounding checks, and local citation feedback. The default browser experience now contains a home page, unified search, grounded Q&A, a knowledge library, and an administrative console. Real QQ/WeChat data remains deliberately gated; only fictional fixtures and the provider-neutral chat contract are supported during development.
 
 ## Phase 1 status
 
@@ -94,6 +94,10 @@ DOCX, XLSX, and PPTX extraction is dependency-free and bounded: it rejects unsaf
 XML entities, compression bombs, macros, ActiveX, and embedded objects, and never follows external
 links. PDF extraction uses the pinned pure-Python `pypdf` dependency and rejects encryption,
 JavaScript, launch actions, document-level actions, and embedded attachments.
+
+Schema 13 introduces verifiable chunk locations and local citation feedback. On first upgrade,
+old lexical/vector chunks are invalidated because their exact locations cannot be reconstructed
+reliably; rebuild both indexes from the knowledge library before asking questions.
 
 Use **Console → Data & Index → Choose folder** to select a real document folder with the native
 Windows dialog. Selection only fills the path; registration still requires explicit authorization,

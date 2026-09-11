@@ -461,6 +461,16 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get("confirmation") != "delete-all-local-qa-history":
                         raise PermissionError("Q&A history deletion confirmation did not match")
                     self._json(store.delete_all_qa_sessions())
+                elif self.path == "/api/citation-feedback":
+                    self._json(
+                        store.record_citation_feedback(
+                            session_id=str(body["session_id"]),
+                            source_id=str(body["source_id"]),
+                            document_id=str(body["document_id"]),
+                            chunk_id=str(body["chunk_id"]),
+                            verdict=str(body["verdict"]),
+                        )
+                    )
                 elif self.path == "/api/reveal":
                     path = resolve_document_path(
                         store, str(body["source_id"]), str(body["document_id"])

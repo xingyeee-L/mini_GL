@@ -1,0 +1,12 @@
+[
+  {"query":"CS61A 使用什么语言","relevant":"cs61a.md","forbidden":["C语言"]},
+  {"query":"Python 零基础课程","relevant":"cs50p.md","forbidden":["Rust"]},
+  {"query":"CS106B 数据结构","relevant":"cs106b.md","forbidden":["OCaml"]},
+  {"query":"使用 Rust 学习内存安全","relevant":"cs110l.md","forbidden":["Python"]},
+  {"query":"OCaml 函数式编程课程","relevant":"cs3110.md","forbidden":["C++"]},
+  {"query":"哪门课讲解释器和高阶函数","relevant":"cs61a.md","forbidden":["C语言"]},
+  {"query":"哪门课适合完全没有编程经验的人","relevant":"cs50p.md","forbidden":["C++"]},
+  {"query":"递归和抽象数据类型课程","relevant":"cs106b.md","forbidden":["Rust"]},
+  {"query":"所有权 生命周期 并发","relevant":"cs110l.md","forbidden":["OCaml"]},
+  {"query":"模块 测试 形式化推理","relevant":"cs3110.md","forbidden":["Python"]}
+]

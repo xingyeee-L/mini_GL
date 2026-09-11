@@ -12,7 +12,7 @@ from mini_gl.generation.local_http import (
     LocalOpenAIChatModel,
 )
 from mini_gl.generation.models import ChatResponse
-from mini_gl.generation.service import RAGService
+from mini_gl.generation.service import RAGService, _grounding_diagnostics
 from mini_gl.indexing.embeddings import DeterministicLocalEmbedding
 from mini_gl.ingestion import IngestionService
 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
@@ -203,6 +203,26 @@ class GenerationTests(unittest.TestCase):
         self.assertNotIn("绿色奶酪", result.answer)
         self.assertIn("绿色奶酪", result.raw_model_answer or "")
         self.assertTrue(result.validation["partial_answer_available"])
+
+    def test_course_entity_language_mismatch_is_rejected(self) -> None:
+        evidence = (
+            "UCB CS61A 使用 Python 与 Scheme 讲授程序构造、递归和抽象。",
+        )
+        mismatch = _grounding_diagnostics(
+            "CS61A 学什么",
+            "通过 UCB CS61A 学习 C 语言。[来源 1]",
+            evidence,
+            DeterministicLocalEmbedding(64),
+        )
+        supported = _grounding_diagnostics(
+            "CS61A 学什么",
+            "通过 UCB CS61A 学习 Python 与 Scheme。[来源 1]",
+            evidence,
+            DeterministicLocalEmbedding(64),
+        )
+        self.assertFalse(mismatch["passed"])
+        self.assertEqual(mismatch["units"][0]["reason"], "entity_attribute_mismatch")
+        self.assertTrue(supported["passed"])
 
     def test_broad_route_question_expands_retrieval_and_diversifies_documents(self) -> None:
         root = self.base / "roadmap-source"

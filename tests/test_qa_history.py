@@ -20,7 +20,7 @@ class LocalQaHistoryTests(unittest.TestCase):
 
             with ThreadPoolExecutor(max_workers=6) as pool:
                 versions = list(pool.map(lambda _: open_and_read(), range(12)))
-        self.assertEqual(versions, [11] * 12)
+        self.assertEqual(versions, [13] * 12)
 
     def test_save_list_reopen_and_delete_one_session(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -65,7 +65,8 @@ class ContextBuilder:
             if result_source not in allowed_sources:
                 continue
             row = self.store.connection.execute(
-                "SELECT chunk_id,document_id,source_id,source_uri,title,content "
+                "SELECT chunk_id,document_id,source_id,source_uri,title,content,"
+                "section_path,start_offset,end_offset "
                 "FROM lexical_chunks "
                 "WHERE source_id=? AND chunk_id=?",
                 (result_source, str(result["chunk_id"])),
@@ -77,7 +78,8 @@ class ContextBuilder:
                 continue
             seen.add(digest)
             label = len(citations) + 1
-            header = f"[来源 {label}] {row['title']}\n"
+            section = f" · {row['section_path']}" if row["section_path"] else ""
+            header = f"[来源 {label}] {row['title']}{section}\n"
             header_tokens = self.counter.count(header)
             available_tokens = self.max_tokens - used_tokens - header_tokens
             if available_tokens <= 0:
@@ -95,8 +97,11 @@ class ContextBuilder:
                     source_uri=str(row["source_uri"]),
                     title=str(row["title"]),
                     source_id=str(row["source_id"]),
-                    start_offset=0,
-                    end_offset=len(content),
+                    section_path=str(row["section_path"]) or None,
+                    start_offset=int(row["start_offset"]),
+                    end_offset=min(
+                        int(row["end_offset"]), int(row["start_offset"]) + len(content)
+                    ),
                 )
             )
         return ContextBundle(
