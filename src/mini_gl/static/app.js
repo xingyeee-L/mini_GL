@@ -4,6 +4,7 @@ const token = document.querySelector('meta[name="mini-gl-token"]').content;
 const byId = (id) => document.getElementById(id);
 let sources = [];
 let details = new Map();
+let schedules = new Map();
 
 async function api(path, options = {}) {
   options.headers = {...(options.headers || {}), "X-Mini-GL-CSRF": token};
@@ -124,8 +125,9 @@ async function loadAll(keep = true) {
     search: byId("search-source").value,
     ask: byId("ask-source").value,
   };
-  const [runtime, sourceList] = await Promise.all([api("/api/runtime"), api("/api/sources")]);
+  const [runtime, sourceList, scheduleList] = await Promise.all([api("/api/runtime"), api("/api/sources"), api("/api/schedules")]);
   sources = sourceList;
+  schedules = new Map(scheduleList.schedules.map((schedule) => [schedule.source_id, schedule]));
   byId("network-state").textContent = runtime.network;
   byId("embedding-state").textContent = runtime.embedding;
   byId("model-state").textContent = runtime.chat_model;
@@ -195,6 +197,14 @@ async function showSourceDetail() {
   ["sync", "index", "vector-index"].forEach((key) => { byId(key).disabled = source.paused; });
   const run = detail.status.latest_run;
   byId("message").textContent = `${source.paused ? "已暂停" : "运行中"} · ${run ? `最近同步 ${run.status}` : "尚未同步"} · ${detail.files.length} 个文件 · 原文件不会被修改`;
+  const schedule = schedules.get(id) || {frequency: "manual", pause_on_battery: true, auto_lexical: true, auto_vector: true};
+  const scheduleForm = byId("source-schedule-form");
+  scheduleForm.elements.frequency.value = schedule.frequency;
+  scheduleForm.elements.pause_on_battery.checked = schedule.pause_on_battery;
+  scheduleForm.elements.auto_indexes.checked = schedule.auto_lexical && schedule.auto_vector;
+  byId("schedule-status").textContent = schedule.frequency === "manual"
+    ? "当前仅手动同步。"
+    : `下次同步：${schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : "等待计算"}${schedule.last_status ? ` · 上次 ${schedule.last_status}` : ""}`;
 }
 
 function createResultCard(result) {
@@ -286,6 +296,81 @@ function citationCard(citation, sourceId, index) {
   card.append(label, title, meta, button); return card;
 }
 
+let currentQaSessionId = null;
+let currentQaTurns = [];
+
+function renderQaTurns() {
+  const wrap = byId("answer-wrap");
+  const empty = byId("conversation-empty");
+  wrap.hidden = currentQaTurns.length === 0;
+  empty.hidden = currentQaTurns.length !== 0;
+  byId("turn-list").replaceChildren(...currentQaTurns.map((turn) => {
+    const item = document.createElement("article"); item.className = "qa-turn";
+    const question = document.createElement("div"); question.className = "question-bubble"; question.textContent = turn.question;
+    const assistant = document.createElement("div"); assistant.className = "assistant-answer";
+    const orb = document.createElement("span"); orb.className = "assistant-orb small"; orb.textContent = "✦";
+    const body = document.createElement("div");
+    const answer = document.createElement("div"); answer.className = `answer${turn.insufficient_evidence ? " insufficient" : ""}`; answer.textContent = turn.answer;
+    const meta = document.createElement("div"); meta.className = "answer-meta";
+    meta.replaceChildren(...[`模型 ${turn.model || "未调用"}`, `检索 ${turn.retrieval_ms} ms`, `生成 ${turn.generation_ms} ms`, `Token ${turn.prompt_tokens ?? "—"} + ${turn.completion_tokens ?? "—"}`].map((value) => { const span = document.createElement("span"); span.textContent = value; return span; }));
+    body.append(answer, meta); assistant.append(orb, body); item.append(question, assistant); return item;
+  }));
+  if (currentQaTurns.length) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function renderQaCitations(turn) {
+  const citations = turn?.citations || [];
+  const sourceId = turn?.source_scope || "all";
+  byId("citations").className = citations.length ? "citations" : "citations empty-evidence";
+  if (!citations.length) { byId("citations").textContent = "没有可展示的支持来源。"; return; }
+  byId("citations").replaceChildren(...citations.map((citation, index) => citationCard(citation, sourceId, index)));
+}
+
+async function loadQaSession(sessionId) {
+  const output = await api(`/api/qa-session/${encodeURIComponent(sessionId)}`);
+  currentQaSessionId = output.session_id;
+  currentQaTurns = output.turns;
+  renderQaTurns();
+  renderQaCitations(currentQaTurns.at(-1));
+  await loadQaSessions();
+}
+
+async function deleteQaSession(sessionId) {
+  const suffix = sessionId.slice(-8);
+  const answer = window.prompt(`这只会删除本地问答历史，不影响原始资料。请输入 ${suffix} 确认：`);
+  if (answer !== suffix) return;
+  await api("/api/delete-qa-session", {method: "POST", body: JSON.stringify({session_id: sessionId, confirmation: suffix})});
+  if (currentQaSessionId === sessionId) resetQaSession();
+  await loadQaSessions();
+  showToast("该会话已从本地历史中删除");
+}
+
+async function loadQaSessions() {
+  const output = await api("/api/qa-sessions?limit=50");
+  const container = byId("qa-sessions");
+  if (!output.sessions.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "还没有本地会话。"; container.replaceChildren(empty); return; }
+  container.replaceChildren(...output.sessions.map((session) => {
+    const row = document.createElement("div"); row.className = `qa-session${session.session_id === currentQaSessionId ? " active" : ""}`;
+    const open = document.createElement("button"); open.className = "qa-session-main";
+    const title = document.createElement("strong"); title.textContent = session.title;
+    const detail = document.createElement("small"); detail.textContent = `${session.turn_count} 轮 · ${new Date(session.updated_at).toLocaleString()}`;
+    open.append(title, detail); open.onclick = () => loadQaSession(session.session_id).catch((error) => showToast(error.message, true));
+    const remove = document.createElement("button"); remove.className = "qa-session-delete"; remove.title = "删除本地会话"; remove.textContent = "删除"; remove.onclick = () => deleteQaSession(session.session_id).catch((error) => showToast(error.message, true));
+    row.append(open, remove); return row;
+  }));
+}
+
+function resetQaSession() {
+  currentQaSessionId = null;
+  currentQaTurns = [];
+  renderQaTurns();
+  byId("citations").className = "citations empty-evidence";
+  byId("citations").textContent = "回答后，相关来源会显示在这里。";
+  byId("ask-status").textContent = "本地 Qwen · 每个事实必须通过来源校验";
+}
+
+byId("new-qa-session").onclick = () => { resetQaSession(); loadQaSessions().catch((error) => showToast(error.message, true)); };
+
 byId("ask-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = new FormData(event.target);
@@ -296,23 +381,18 @@ byId("ask-form").addEventListener("submit", async (event) => {
     if (!sourceId) throw new Error("请先选择数据源");
     status.className = "inline-status";
     status.textContent = "正在本机检索、生成并核对每一句来源…";
-    byId("conversation-empty").hidden = true;
-    byId("answer-wrap").hidden = false;
-    byId("question-display").textContent = question;
-    byId("answer").textContent = "正在思考…";
     byId("citations").className = "citations empty-evidence";
     byId("citations").textContent = "正在寻找可靠来源…";
-    const output = await api("/api/ask", {method: "POST", body: JSON.stringify({source_id: sourceId, query: question, file_type: form.get("file_type") || null})});
-    byId("answer").textContent = output.answer;
-    byId("answer").className = `answer${output.insufficient_evidence ? " insufficient" : ""}`;
+    const output = await api("/api/ask", {method: "POST", body: JSON.stringify({source_id: sourceId, query: question, file_type: form.get("file_type") || null, session_id: currentQaSessionId})});
+    currentQaSessionId = output.session_id;
+    currentQaTurns.push({...output, question, source_scope: sourceId});
+    renderQaTurns();
+    renderQaCitations(currentQaTurns.at(-1));
     status.textContent = output.insufficient_evidence ? "现有资料不足，系统已安全停止。" : "回答已通过引用与证据检查。";
-    byId("answer-meta").replaceChildren(...[`模型 ${output.model || "未调用"}`, `检索 ${output.retrieval_ms} ms`, `生成 ${output.generation_ms} ms`, `Token ${output.prompt_tokens ?? "—"} + ${output.completion_tokens ?? "—"}`].map((value) => { const span = document.createElement("span"); span.textContent = value; return span; }));
-    byId("citations").className = "citations";
-    byId("citations").replaceChildren(...output.citations.map((citation, index) => citationCard(citation, sourceId, index)));
-    if (!output.citations.length) { byId("citations").className = "citations empty-evidence"; byId("citations").textContent = "没有可展示的支持来源。"; }
+    event.target.reset();
+    fillSourceSelect(byId("ask-source"), sourceId);
+    await loadQaSessions();
   } catch (error) {
-    byId("answer-wrap").hidden = true;
-    byId("conversation-empty").hidden = false;
     status.textContent = `本地问答暂不可用：${error.message}`;
     status.className = "inline-status error";
   }
@@ -335,6 +415,48 @@ byId("register").addEventListener("submit", async (event) => {
   event.preventDefault();
   try { const form = new FormData(event.target); await api("/api/register", {method: "POST", body: JSON.stringify({root: form.get("root"), authorized: form.get("authorized") === "on"})}); await loadAll(false); showToast("常用文档格式已授权，可以开始只读同步"); }
   catch (error) { showToast(error.message, true); }
+});
+
+async function loadCommonFolders() {
+  const output = await api("/api/common-folders");
+  const byKey = new Map(output.folders.map((folder) => [folder.key, folder]));
+  document.querySelectorAll('#common-folders input[name="folders"]').forEach((input) => {
+    const folder = byKey.get(input.value);
+    const label = input.closest("label");
+    input.disabled = !folder?.available;
+    label.classList.toggle("unavailable", !folder?.available);
+    label.title = folder ? `${folder.path}${folder.registered ? " · 已注册" : ""}` : "不可用";
+    label.querySelector(".registered-note")?.remove();
+    if (folder?.registered) { const note = document.createElement("small"); note.className = "registered-note"; note.textContent = "已注册"; label.append(note); }
+  });
+}
+
+byId("common-folders-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const status = byId("common-folders-status");
+  try {
+    const form = new FormData(event.target);
+    const folders = form.getAll("folders").map(String);
+    const autoIndexes = form.get("auto_indexes") === "on";
+    const output = await api("/api/register-common-folders", {method: "POST", body: JSON.stringify({folders, frequency: form.get("frequency"), authorized: form.get("authorized") === "on", pause_on_battery: form.get("pause_on_battery") === "on", auto_lexical: autoIndexes, auto_vector: autoIndexes})});
+    status.textContent = `已注册 ${output.registered.length} 个独立数据源；注册过程没有扫描正文。`;
+    await loadAll(false);
+    await loadCommonFolders();
+  } catch (error) { status.textContent = `注册失败：${error.message}`; }
+});
+
+byId("source-schedule-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const sourceId = byId("sources").value;
+  if (!sourceId) return;
+  const form = new FormData(event.target);
+  const autoIndexes = form.get("auto_indexes") === "on";
+  try {
+    const output = await api("/api/source-schedule", {method: "POST", body: JSON.stringify({source_id: sourceId, frequency: form.get("frequency"), pause_on_battery: form.get("pause_on_battery") === "on", auto_lexical: autoIndexes, auto_vector: autoIndexes})});
+    schedules.set(sourceId, output);
+    await showSourceDetail();
+    showToast("自动同步计划已保存");
+  } catch (error) { showToast(error.message, true); }
 });
 
 byId("choose-root").addEventListener("click", async () => {
@@ -404,6 +526,28 @@ async function diagnose() {
 
 byId("diagnose").onclick = diagnose;
 byId("diagnose-models").onclick = diagnose;
+
+async function loadManagedBackups() {
+  const output = await api("/api/backups");
+  const container = byId("backup-list");
+  if (!output.backups.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "还没有应用托管备份。"; container.replaceChildren(empty); return; }
+  container.replaceChildren(...output.backups.map((backup) => {
+    const item = document.createElement("div"); item.className = "backup-item";
+    const text = document.createElement("div");
+    const name = document.createElement("strong"); name.textContent = backup.name;
+    const detail = document.createElement("small"); detail.textContent = `${Math.ceil(backup.size / 1024)} KiB · ${new Date(backup.modified_at).toLocaleString()}`;
+    text.append(name, detail);
+    const choose = document.createElement("button"); choose.className = "secondary"; choose.textContent = "用于恢复"; choose.onclick = () => { byId("restore-form").elements.backup.value = backup.path; };
+    item.append(text, choose); return item;
+  }));
+}
+
+byId("managed-backup").onclick = async () => {
+  const status = byId("maintenance-status");
+  try { const output = await api("/api/managed-backup", {method: "POST", body: "{}"}); status.className = "inline-status"; status.textContent = `托管备份完成：${output.path} · ${output.integrity}`; await loadManagedBackups(); }
+  catch (error) { status.textContent = `备份失败：${error.message}`; status.className = "inline-status error"; }
+};
+
 byId("backup-form").addEventListener("submit", async (event) => {
   event.preventDefault(); const status = byId("maintenance-status");
   try { const destination = new FormData(event.target).get("destination"); const output = await api("/api/backup", {method: "POST", body: JSON.stringify({destination})}); status.textContent = `备份完成：${output.path} · ${output.integrity} · SHA-256 ${output.sha256.slice(0, 12)}…`; }
@@ -423,4 +567,7 @@ byId("command-input").addEventListener("keydown", (event) => { if (event.key ===
 
 switchView(location.hash.slice(1) || "home");
 loadAll().catch((error) => showToast(`无法读取本地状态：${error.message}`, true));
+loadQaSessions().catch((error) => showToast(`无法读取本地会话：${error.message}`, true));
+loadManagedBackups().catch((error) => showToast(`无法读取本地备份：${error.message}`, true));
+loadCommonFolders().catch((error) => showToast(`无法读取常用目录状态：${error.message}`, true));
 diagnose();

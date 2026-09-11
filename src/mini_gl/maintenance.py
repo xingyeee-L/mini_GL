@@ -6,6 +6,8 @@ import hashlib
 import os
 import sqlite3
 import stat
+import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mini_gl.security.paths import FILE_ATTRIBUTE_REPARSE_POINT
@@ -37,6 +39,48 @@ def restore_database(backup: Path, destination: Path) -> dict[str, object]:
         return _copy_verified(source, target, operation="restore")
     except sqlite3.DatabaseError as exc:
         raise DatabaseMaintenanceError("SQLite restore failed integrity validation") from exc
+
+
+def create_managed_backup(database: Path) -> dict[str, object]:
+    """Create a timestamped snapshot inside the database's application-owned backup folder."""
+    source = _existing_regular_file(database, "Database")
+    directory = source.parent / "backups"
+    if directory.exists():
+        if not directory.is_dir():
+            raise DatabaseMaintenanceError("Managed backup path is not a directory")
+        _reject_links(directory)
+    else:
+        _reject_links(directory.parent)
+        directory.mkdir()
+    timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    destination = directory / f"mini-gl-{timestamp}-{uuid.uuid4().hex[:8]}.sqlite3"
+    return backup_database(source, destination)
+
+
+def list_managed_backups(database: Path) -> list[dict[str, object]]:
+    """List only verified application-owned backup files; never scans user source folders."""
+    directory = database.absolute().parent / "backups"
+    if not directory.exists():
+        return []
+    if not directory.is_dir():
+        raise DatabaseMaintenanceError("Managed backup path is not a directory")
+    _reject_links(directory)
+    backups: list[dict[str, object]] = []
+    for path in directory.iterdir():
+        _reject_links(path)
+        if not path.is_file() or path.suffix.lower() != ".sqlite3":
+            continue
+        info = path.stat()
+        backups.append(
+            {
+                "name": path.name,
+                "path": str(path.resolve(strict=True)),
+                "size": info.st_size,
+                "modified_at": datetime.fromtimestamp(info.st_mtime, UTC).isoformat(),
+            }
+        )
+    backups.sort(key=lambda item: (str(item["modified_at"]), str(item["name"])), reverse=True)
+    return backups
 
 
 def _copy_verified(source: Path, target: Path, *, operation: str) -> dict[str, object]:

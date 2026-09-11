@@ -27,10 +27,16 @@ from mini_gl.generation.models import ChatModel
 from mini_gl.generation.service import RAGService
 from mini_gl.indexing.embeddings import EmbeddingProvider, load_bge_provider
 from mini_gl.ingestion import IngestionService
-from mini_gl.maintenance import backup_database, restore_database
+from mini_gl.maintenance import (
+    backup_database,
+    create_managed_backup,
+    list_managed_backups,
+    restore_database,
+)
 from mini_gl.retrieval.hybrid import HybridSearchService, TokenOverlapReranker
 from mini_gl.retrieval.lexical import LexicalSearchService
 from mini_gl.retrieval.vector import VectorSearchService
+from mini_gl.scheduler import AutoSyncScheduler, common_folder_candidates, next_run_time
 from mini_gl.security.paths import PathPolicy
 from mini_gl.storage.sqlite import SQLiteStore
 
@@ -93,6 +99,14 @@ class AcceptanceServer(ThreadingHTTPServer):
     chat_model: ChatModel
     policy: PolicyEngine
     directory_picker: Callable[[], Path | None]
+    common_home: Path | None
+    scheduler: AutoSyncScheduler | None
+
+    def server_close(self) -> None:
+        scheduler = getattr(self, "scheduler", None)
+        if scheduler is not None:
+            scheduler.stop()
+        super().server_close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -204,7 +218,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"message": "Unauthorized request"}, HTTPStatus.FORBIDDEN)
             return
         try:
-            with SQLiteStore(self.server.db_path) as store:
+            with SQLiteStore(self.server.db_path, recover_interrupted=False) as store:
                 if path == "/api/sources":
                     self._json(store.status())
                 elif path == "/api/runtime":
@@ -217,6 +231,29 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 elif path == "/api/diagnostics":
                     self._json(runtime_diagnostics(store, self.server.db_path))
+                elif path == "/api/backups":
+                    self._json({"backups": list_managed_backups(self.server.db_path)})
+                elif path == "/api/common-folders":
+                    registered = {str(source.root_path) for source in store.list_sources()}
+                    folders = common_folder_candidates(self.server.common_home)
+                    for folder in folders:
+                        folder["registered"] = str(folder["path"]) in registered
+                    self._json({"folders": folders})
+                elif path == "/api/schedules":
+                    self._json({"schedules": store.list_source_schedules()})
+                elif path == "/api/qa-sessions":
+                    query = parse_qs(urlparse(self.path).query)
+                    self._json(
+                        {
+                            "sessions": store.list_qa_sessions(
+                                int(query.get("limit", ["50"])[0])
+                            )
+                        }
+                    )
+                elif path.startswith("/api/qa-session/"):
+                    self._json(
+                        store.get_qa_session(path.removeprefix("/api/qa-session/"))
+                    )
                 elif path.startswith("/api/source/"):
                     source_id = path.removeprefix("/api/source/")
                     status = store.status(source_id)[0]
@@ -272,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             body = self._body()
-            with SQLiteStore(self.server.db_path) as store:
+            with SQLiteStore(self.server.db_path, recover_interrupted=False) as store:
                 service = IngestionService(store)
                 if self.path == "/api/register":
                     if body.get("authorized") is not True:
@@ -281,6 +318,61 @@ class Handler(BaseHTTPRequestHandler):
                         )
                     source = service.register(Path(str(body["root"])))
                     self._json({"source_id": source.source_id})
+                elif self.path == "/api/register-common-folders":
+                    if body.get("authorized") is not True:
+                        raise PermissionError(
+                            "Explicit authorization is required for every common folder"
+                        )
+                    selected = body.get("folders")
+                    if not isinstance(selected, list) or not selected:
+                        raise ValueError("Select at least one common folder")
+                    if any(not isinstance(item, str) for item in selected):
+                        raise ValueError("Common folder selection is invalid")
+                    allowed = {
+                        str(item["key"]): item
+                        for item in common_folder_candidates(self.server.common_home)
+                    }
+                    if not set(selected) <= allowed.keys():
+                        raise ValueError("Unknown common folder")
+                    frequency = str(body.get("frequency", "manual"))
+                    registered = []
+                    for key in dict.fromkeys(selected):
+                        candidate = allowed[key]
+                        if not bool(candidate["available"]):
+                            raise FileNotFoundError(f"{candidate['label']} folder is unavailable")
+                        source = service.register(Path(str(candidate["path"])))
+                        schedule = store.set_source_schedule(
+                            source.source_id,
+                            frequency=frequency,
+                            enabled=frequency != "manual",
+                            pause_on_battery=body.get("pause_on_battery") is not False,
+                            auto_lexical=body.get("auto_lexical") is not False,
+                            auto_vector=body.get("auto_vector") is not False,
+                            next_run_at=next_run_time(frequency),
+                        )
+                        registered.append(
+                            {
+                                "key": key,
+                                "source_id": source.source_id,
+                                "path": str(source.root_path),
+                                "schedule": schedule,
+                            }
+                        )
+                    self._json({"registered": registered})
+                elif self.path == "/api/source-schedule":
+                    source_id = str(body["source_id"])
+                    frequency = str(body.get("frequency", "manual"))
+                    self._json(
+                        store.set_source_schedule(
+                            source_id,
+                            frequency=frequency,
+                            enabled=frequency != "manual",
+                            pause_on_battery=body.get("pause_on_battery") is not False,
+                            auto_lexical=body.get("auto_lexical") is not False,
+                            auto_vector=body.get("auto_vector") is not False,
+                            next_run_at=next_run_time(frequency),
+                        )
+                    )
                 elif self.path == "/api/pick-directory":
                     selected = self.server.directory_picker()
                     self._json(
@@ -330,7 +422,34 @@ class Handler(BaseHTTPRequestHandler):
                         tuple(source_ids),
                         file_type=(str(body["file_type"]) if body.get("file_type") else None),
                     )
-                    self._json(asdict(answer))
+                    payload = json.loads(
+                        json.dumps(
+                            asdict(answer),
+                            ensure_ascii=False,
+                            default=lambda value: value.isoformat(),
+                        )
+                    )
+                    payload["session_id"] = store.save_qa_turn(
+                        session_id=(
+                            str(body["session_id"]) if body.get("session_id") else None
+                        ),
+                        source_scope=source_id,
+                        question=str(body.get("query", "")),
+                        answer=str(payload["answer"]),
+                        citations=list(payload["citations"]),
+                        insufficient_evidence=bool(payload["insufficient_evidence"]),
+                        model=(str(payload["model"]) if payload["model"] else None),
+                        retrieval_ms=float(payload["retrieval_ms"]),
+                        generation_ms=float(payload["generation_ms"]),
+                        prompt_tokens=payload["prompt_tokens"],
+                        completion_tokens=payload["completion_tokens"],
+                    )
+                    self._json(payload)
+                elif self.path == "/api/delete-qa-session":
+                    session_id = str(body["session_id"])
+                    if body.get("confirmation") != session_id[-8:]:
+                        raise PermissionError("Q&A session deletion confirmation did not match")
+                    self._json(store.delete_qa_session(session_id))
                 elif self.path == "/api/reveal":
                     path = resolve_document_path(
                         store, str(body["source_id"]), str(body["document_id"])
@@ -351,6 +470,8 @@ class Handler(BaseHTTPRequestHandler):
                             self.server.db_path, Path(str(body["destination"]))
                         )
                     )
+                elif self.path == "/api/managed-backup":
+                    self._json(create_managed_backup(self.server.db_path))
                 elif self.path == "/api/restore":
                     if body.get("confirmation") != "RESTORE":
                         raise PermissionError("Restore confirmation did not match")
@@ -369,12 +490,16 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> AcceptanceServer:
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local workspace may only bind to loopback")
+    with SQLiteStore(db_path):
+        pass
     server = AcceptanceServer((host, port), Handler)
     server.db_path = db_path
     server.csrf_token = secrets.token_urlsafe(32)
     server.embedding_provider = None
     server.policy = PolicyEngine()
     server.directory_picker = pick_directory
+    server.common_home = None
+    server.scheduler = None
     server.chat_model = LocalOpenAIChatModel(
         "http://127.0.0.1:11434/v1/chat/completions",
         "qwen3:4b-instruct-2507-q4_K_M",
@@ -452,6 +577,8 @@ def reveal_path(path: Path) -> None:
 
 def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
     with make_server(db_path, host, port) as server:
+        server.scheduler = AutoSyncScheduler(db_path, load_bge_provider)
+        server.scheduler.start()
         print(f"mini_GL local workspace: http://{host}:{server.server_port}")
         server.serve_forever()
 
@@ -459,6 +586,8 @@ def serve(db_path: Path, host: str = "127.0.0.1", port: int = 8765) -> None:
 def desktop(db_path: Path, port: int = 8765) -> None:
     """Start the loopback workspace and open it in the system browser once ready."""
     with make_server(db_path, "127.0.0.1", port) as server:
+        server.scheduler = AutoSyncScheduler(db_path, load_bge_provider)
+        server.scheduler.start()
         url = f"http://127.0.0.1:{server.server_port}"
         threading.Timer(0.4, webbrowser.open, args=(url,)).start()
         print(f"mini_GL desktop workspace: {url}")

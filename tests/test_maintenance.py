@@ -8,6 +8,8 @@ from mini_gl.ingestion import IngestionService
 from mini_gl.maintenance import (
     DatabaseMaintenanceError,
     backup_database,
+    create_managed_backup,
+    list_managed_backups,
     restore_database,
 )
 from mini_gl.storage.sqlite import SQLiteStore
@@ -58,3 +60,17 @@ class DatabaseMaintenanceTests(unittest.TestCase):
             self.assertEqual(occupied.read_text(encoding="utf-8"), "keep")
             with self.assertRaisesRegex(DatabaseMaintenanceError, "overwrite"):
                 restore_database(source, occupied)
+
+    def test_managed_backups_are_created_and_listed_without_source_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            database = base / "state.sqlite3"
+            with SQLiteStore(database):
+                first = create_managed_backup(database)
+                second = create_managed_backup(database)
+            backups = list_managed_backups(database)
+            self.assertEqual(len(backups), 2)
+            self.assertEqual({item["path"] for item in backups}, {first["path"], second["path"]})
+            self.assertTrue(
+                all(Path(str(item["path"])).parent.name == "backups" for item in backups)
+            )

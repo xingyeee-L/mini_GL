@@ -119,6 +119,47 @@ class WebAcceptanceTests(unittest.TestCase):
         )
         self.assertTrue(registered["source_id"])
 
+    def test_common_folders_require_per_selection_authorization_without_scanning(self) -> None:
+        home = self.base / "profile"
+        documents = home / "Documents"
+        downloads = home / "Downloads"
+        documents.mkdir(parents=True)
+        downloads.mkdir()
+        (documents / "not-yet-read.txt").write_text("deferred content", encoding="utf-8")
+        self.server.common_home = home
+        candidates = self._get_json("/api/common-folders")
+        self.assertEqual(
+            {item["key"] for item in candidates["folders"] if item["available"]},
+            {"documents", "downloads"},
+        )
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json(
+                "/api/register-common-folders",
+                {"folders": ["documents"], "frequency": "hourly"},
+            )
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        result = self._post_json(
+            "/api/register-common-folders",
+            {
+                "folders": ["documents", "downloads"],
+                "frequency": "hourly",
+                "authorized": True,
+            },
+        )
+        self.assertEqual(len(result["registered"]), 2)
+        with SQLiteStore(self.db, recover_interrupted=False) as store:
+            new_ids = [item["source_id"] for item in result["registered"]]
+            self.assertTrue(
+                all(store.status(str(source_id))[0]["file_count"] == 0 for source_id in new_ids)
+            )
+            self.assertTrue(
+                all(
+                    store.get_source_schedule(str(source_id))["frequency"] == "hourly"
+                    for source_id in new_ids
+                )
+            )
+
     def test_native_directory_picker_only_returns_path_without_registering(self) -> None:
         selected = self.base / "selected-but-not-registered"
         selected.mkdir()
@@ -211,6 +252,10 @@ class WebAcceptanceTests(unittest.TestCase):
             },
         )
         self.assertEqual(restore_result["integrity"], "ok")
+        managed = self._post_json("/api/managed-backup", {})
+        self.assertEqual(managed["integrity"], "ok")
+        listed = self._get_json("/api/backups")
+        self.assertEqual(listed["backups"][0]["path"], managed["path"])
 
     def test_server_rejects_non_loopback_binding(self) -> None:
         with self.assertRaisesRegex(ValueError, "loopback"):
@@ -293,6 +338,36 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertFalse(result["insufficient_evidence"])
         self.assertEqual(result["citations"][0]["title"], "visible-name.txt")
         self.assertEqual(result["prompt_tokens"], 12)
+        session_id = str(result["session_id"])
+        sessions = self._get_json("/api/qa-sessions")
+        self.assertEqual(sessions["sessions"][0]["session_id"], session_id)
+        self.assertEqual(sessions["sessions"][0]["turn_count"], 1)
+        self.assertNotIn("secret body[", json.dumps(sessions, ensure_ascii=False))
+
+        second = self._post_json(
+            "/api/ask",
+            {
+                "source_id": self.source_id,
+                "query": "secret body",
+                "session_id": session_id,
+            },
+        )
+        self.assertEqual(second["session_id"], session_id)
+        history = self._get_json(f"/api/qa-session/{session_id}")
+        self.assertEqual(len(history["turns"]), 2)
+
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json(
+                "/api/delete-qa-session",
+                {"session_id": session_id, "confirmation": "wrong"},
+            )
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        deleted = self._post_json(
+            "/api/delete-qa-session",
+            {"session_id": session_id, "confirmation": session_id[-8:]},
+        )
+        self.assertEqual(deleted["turns"], 2)
 
     def test_cross_source_answer_authorizes_and_preserves_citation_source(self) -> None:
         second_root = self.base / "answer-source"
