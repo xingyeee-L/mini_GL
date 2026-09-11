@@ -202,7 +202,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(page_bytes)
             return
-        if path in {"/assets/app.css", "/assets/app.js"}:
+        if path in {"/assets/app.css", "/assets/interactions.css", "/assets/app.js"}:
             asset = STATIC_ROOT / Path(path).name
             asset_bytes = asset.read_bytes()
             media_type = "text/css" if asset.suffix == ".css" else "text/javascript"
@@ -421,7 +421,9 @@ class Handler(BaseHTTPRequestHandler):
                         TokenOverlapReranker(),
                     )
                     answer = RAGService(
-                        retrieval, ContextBuilder(store), self.server.chat_model
+                        retrieval,
+                        ContextBuilder(store, max_tokens=5_000, max_chunks=10),
+                        self.server.chat_model,
                     ).answer_sources(
                         str(body.get("query", "")),
                         tuple(source_ids),
@@ -455,6 +457,10 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get("confirmation") != session_id[-8:]:
                         raise PermissionError("Q&A session deletion confirmation did not match")
                     self._json(store.delete_qa_session(session_id))
+                elif self.path == "/api/delete-all-qa-sessions":
+                    if body.get("confirmation") != "delete-all-local-qa-history":
+                        raise PermissionError("Q&A history deletion confirmation did not match")
+                    self._json(store.delete_all_qa_sessions())
                 elif self.path == "/api/reveal":
                     path = resolve_document_path(
                         store, str(body["source_id"]), str(body["document_id"])

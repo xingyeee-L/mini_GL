@@ -561,6 +561,16 @@ class SQLiteStore:
             )
         return {"session_id": normalized_id, "turns": count}
 
+    def delete_all_qa_sessions(self) -> dict[str, int]:
+        """Delete only locally derived Q&A history, never sources or documents."""
+        session_count = int(
+            self.connection.execute("SELECT COUNT(*) FROM qa_sessions").fetchone()[0]
+        )
+        turn_count = int(self.connection.execute("SELECT COUNT(*) FROM qa_turns").fetchone()[0])
+        with self.connection:
+            self.connection.execute("DELETE FROM qa_sessions")
+        return {"sessions": session_count, "turns": turn_count}
+
     def set_source_schedule(
         self,
         source_id: str,

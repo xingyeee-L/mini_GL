@@ -38,6 +38,24 @@ class UnsupportedClaimModel(RecordingModel):
         return ChatResponse("月球由绿色奶酪构成[来源 1]。")
 
 
+class MarkdownRoadmapModel(RecordingModel):
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
+        self.calls.append((system_prompt, user_prompt))
+        return ChatResponse(
+            "## 自学路线\n\n第一阶段：系统只允许读取授权目录。 [来源1]\n"
+            "第二阶段：继续拒绝符号链接。[来源 1]"
+        )
+
+
+class PartiallyGroundedModel(RecordingModel):
+    def generate(self, *, system_prompt: str, user_prompt: str) -> ChatResponse:
+        self.calls.append((system_prompt, user_prompt))
+        return ChatResponse(
+            "## 路线\n系统只允许读取授权目录。[来源 1]\n"
+            "月球由绿色奶酪构成。[来源 1]"
+        )
+
+
 class GenerationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -164,4 +182,46 @@ class GenerationTests(unittest.TestCase):
         service = RAGService(self.rag.retrieval, self.rag.context, model)
         result = service.answer("如何限制读取范围", self.source_id)
         self.assertTrue(result.insufficient_evidence)
-        self.assertIn("未通过逐句来源支持检查", result.answer)
+        self.assertIn("未通过逐段来源支持检查", result.answer)
+        self.assertEqual(result.raw_model_answer, "月球由绿色奶酪构成[来源 1]。")
+        self.assertFalse(result.validation["passed"])
+        self.assertEqual(result.validation["reason"], "claim_support")
+
+    def test_markdown_headings_and_citation_spacing_do_not_cause_false_rejection(self) -> None:
+        model = MarkdownRoadmapModel()
+        service = RAGService(self.rag.retrieval, self.rag.context, model)
+        result = service.answer("如何限制读取范围", self.source_id)
+        self.assertFalse(result.insufficient_evidence)
+        self.assertIn("[来源1]", result.answer)
+
+    def test_supported_paragraphs_survive_when_another_claim_fails(self) -> None:
+        model = PartiallyGroundedModel()
+        service = RAGService(self.rag.retrieval, self.rag.context, model)
+        result = service.answer("如何限制读取范围", self.source_id)
+        self.assertTrue(result.insufficient_evidence)
+        self.assertIn("系统只允许读取授权目录", result.answer)
+        self.assertNotIn("绿色奶酪", result.answer)
+        self.assertIn("绿色奶酪", result.raw_model_answer or "")
+        self.assertTrue(result.validation["partial_answer_available"])
+
+    def test_broad_route_question_expands_retrieval_and_diversifies_documents(self) -> None:
+        root = self.base / "roadmap-source"
+        root.mkdir()
+        for name, content in (
+            ("plan.md", "计算机自学路线先学习编程基础，再学习数据结构。"),
+            ("systems.md", "核心课程包括操作系统、计算机网络和数据库。"),
+            ("practice.md", "实践阶段应完成课程项目并记录复盘。"),
+        ):
+            (root / name).write_text(content, encoding="utf-8")
+        source = IngestionService(self.store).register(root)
+        IngestionService(self.store).sync(source.source_id)
+        LexicalSearchService(self.store).rebuild(source.source_id)
+        VectorSearchService(self.store, self.rag.retrieval.vector.provider).rebuild(
+            source.source_id
+        )
+
+        self.rag.answer("请设计一条完整的计算机自学路线", source.source_id)
+
+        _, prompt = self.model.calls[-1]
+        self.assertIn("plan.md", prompt)
+        self.assertGreaterEqual(prompt.count("[来源 "), 2)

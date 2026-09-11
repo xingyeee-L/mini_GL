@@ -6,13 +6,38 @@ let sources = [];
 let details = new Map();
 let schedules = new Map();
 let currentFiles = [];
+let pendingRequests = 0;
 
 async function api(path, options = {}) {
   options.headers = {...(options.headers || {}), "X-Mini-GL-CSRF": token};
-  const response = await fetch(path, options);
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.message || "操作失败");
-  return data;
+  pendingRequests += 1;
+  document.body.classList.add("is-loading");
+  try {
+    const response = await fetch(path, options);
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await response.json() : {};
+    if (!response.ok) throw new Error(data.message || `操作失败（HTTP ${response.status}）`);
+    return data;
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error("无法连接本地服务，请确认 mini_GL 正在运行");
+    throw error;
+  } finally {
+    pendingRequests -= 1;
+    if (pendingRequests === 0) document.body.classList.remove("is-loading");
+  }
+}
+
+function setButtonBusy(button, busy, label) {
+  if (!button) return;
+  if (busy) {
+    button.dataset.originalLabel = button.textContent;
+    button.textContent = label;
+  } else if (button.dataset.originalLabel) {
+    button.textContent = button.dataset.originalLabel;
+    delete button.dataset.originalLabel;
+  }
+  button.disabled = busy;
+  button.setAttribute("aria-busy", String(busy));
 }
 
 function showToast(message, error = false) {
@@ -320,9 +345,12 @@ function emptyMessage(titleText, description) {
 
 byId("search-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const button = event.target.querySelector("button");
+  setButtonBusy(button, true, "搜索中…");
   const form = new FormData(event.target);
   try { await runSearch(String(form.get("query")), String(form.get("source_id")), String(form.get("mode")), String(form.get("file_type"))); }
   catch (error) { byId("search-status").textContent = error.message; showToast(error.message, true); }
+  finally { setButtonBusy(button, false); }
 });
 
 byId("home-search-form").addEventListener("submit", async (event) => {
@@ -355,8 +383,15 @@ function citationCard(citation, sourceId, index) {
   card.append(label, title, meta, button); return card;
 }
 
-let currentQaSessionId = null;
+const QA_SESSION_KEY = "mini_gl.active_qa_session";
+let currentQaSessionId = window.localStorage.getItem(QA_SESSION_KEY);
 let currentQaTurns = [];
+
+function rememberQaSession(sessionId) {
+  currentQaSessionId = sessionId;
+  if (sessionId) window.localStorage.setItem(QA_SESSION_KEY, sessionId);
+  else window.localStorage.removeItem(QA_SESSION_KEY);
+}
 
 function renderQaTurns() {
   const wrap = byId("answer-wrap");
@@ -369,12 +404,59 @@ function renderQaTurns() {
     const assistant = document.createElement("div"); assistant.className = "assistant-answer";
     const orb = document.createElement("span"); orb.className = "assistant-orb small"; orb.textContent = "✦";
     const body = document.createElement("div");
-    const answer = document.createElement("div"); answer.className = `answer${turn.insufficient_evidence ? " insufficient" : ""}`; answer.textContent = turn.answer;
+    const answer = document.createElement("div"); answer.className = `answer${turn.insufficient_evidence ? " insufficient" : ""}`; renderAnswer(answer, turn.answer);
     const meta = document.createElement("div"); meta.className = "answer-meta";
     meta.replaceChildren(...[`模型 ${turn.model || "未调用"}`, `检索 ${turn.retrieval_ms} ms`, `生成 ${turn.generation_ms} ms`, `Token ${turn.prompt_tokens ?? "—"} + ${turn.completion_tokens ?? "—"}`].map((value) => { const span = document.createElement("span"); span.textContent = value; return span; }));
-    body.append(answer, meta); assistant.append(orb, body); item.append(question, assistant); return item;
+    body.append(answer, meta);
+    if (turn.raw_model_answer || turn.validation) body.append(renderValidationDetails(turn));
+    assistant.append(orb, body); item.append(question, assistant); return item;
   }));
   if (currentQaTurns.length) wrap.scrollTop = wrap.scrollHeight;
+}
+
+function renderAnswer(container, text) {
+  const lines = String(text).split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  container.replaceChildren(...lines.map((line) => {
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    const item = document.createElement(heading ? "h3" : "p");
+    item.className = heading ? "answer-heading" : "answer-line";
+    const clean = heading ? heading[1] : line.replace(/^[-*+]\s+/, "• ");
+    clean.split(/(\[来源\s*\d+\])/).filter(Boolean).forEach((part) => {
+      if (/^\[来源\s*\d+\]$/.test(part)) {
+        const badge = document.createElement("span");
+        badge.className = "inline-citation";
+        badge.textContent = part.replace(/\s+/g, " ");
+        item.append(badge);
+      } else item.append(document.createTextNode(part));
+    });
+    return item;
+  }));
+}
+
+function renderValidationDetails(turn) {
+  const details = document.createElement("details");
+  details.className = "validation-details";
+  const summary = document.createElement("summary");
+  summary.textContent = turn.insufficient_evidence ? "查看后台完整响应与失败原因" : "查看后台响应与校验详情";
+  const rawTitle = document.createElement("strong"); rawTitle.textContent = "本地模型原始输出";
+  const raw = document.createElement("pre"); raw.textContent = turn.raw_model_answer || "该历史记录未保存原始诊断输出。";
+  const validationTitle = document.createElement("strong"); validationTitle.textContent = "证据校验";
+  const validation = document.createElement("div"); validation.className = "validation-units";
+  const diagnostic = turn.validation || {};
+  const overview = document.createElement("p");
+  overview.textContent = `结果：${diagnostic.passed ? "通过" : "未通过"} · 原因：${diagnostic.reason || "无"} · 可用来源：${diagnostic.citation_count ?? "—"}`;
+  validation.append(overview);
+  (diagnostic.units || []).forEach((unit, index) => {
+    const row = document.createElement("p");
+    const lexical = unit.lexical_overlap == null ? "—" : unit.lexical_overlap;
+    const semantic = unit.semantic_similarity == null ? "—" : unit.semantic_similarity;
+    row.textContent = `${index + 1}. ${unit.supported ? "通过" : "失败"} · ${unit.kind} · 引用 ${(unit.markers || []).join(",") || "—"} · 词面 ${lexical} · 语义 ${semantic} · ${unit.reason || "正常"}`;
+    validation.append(row);
+  });
+  const privacy = document.createElement("small");
+  privacy.textContent = "仅展示本机模型响应与校验指标；完整提示词和来源正文不会写入诊断。";
+  details.append(summary, rawTitle, raw, validationTitle, validation, privacy);
+  return details;
 }
 
 function renderQaCitations(turn) {
@@ -387,7 +469,7 @@ function renderQaCitations(turn) {
 
 async function loadQaSession(sessionId) {
   const output = await api(`/api/qa-session/${encodeURIComponent(sessionId)}`);
-  currentQaSessionId = output.session_id;
+  rememberQaSession(output.session_id);
   currentQaTurns = output.turns;
   renderQaTurns();
   renderQaCitations(currentQaTurns.at(-1));
@@ -396,8 +478,7 @@ async function loadQaSession(sessionId) {
 
 async function deleteQaSession(sessionId) {
   const suffix = sessionId.slice(-8);
-  const answer = window.prompt(`这只会删除本地问答历史，不影响原始资料。请输入 ${suffix} 确认：`);
-  if (answer !== suffix) return;
+  if (!window.confirm("删除这条本地会话？这不会影响知识库和原始文件。")) return;
   await api("/api/delete-qa-session", {method: "POST", body: JSON.stringify({session_id: sessionId, confirmation: suffix})});
   if (currentQaSessionId === sessionId) resetQaSession();
   await loadQaSessions();
@@ -407,6 +488,7 @@ async function deleteQaSession(sessionId) {
 async function loadQaSessions() {
   const output = await api("/api/qa-sessions?limit=50");
   const container = byId("qa-sessions");
+  byId("clear-qa-sessions").disabled = output.sessions.length === 0;
   if (!output.sessions.length) { const empty = document.createElement("p"); empty.className = "muted"; empty.textContent = "还没有本地会话。"; container.replaceChildren(empty); return; }
   container.replaceChildren(...output.sessions.map((session) => {
     const row = document.createElement("div"); row.className = `qa-session${session.session_id === currentQaSessionId ? " active" : ""}`;
@@ -420,18 +502,28 @@ async function loadQaSessions() {
 }
 
 function resetQaSession() {
-  currentQaSessionId = null;
+  rememberQaSession(null);
   currentQaTurns = [];
   renderQaTurns();
   byId("citations").className = "citations empty-evidence";
   byId("citations").textContent = "回答后，相关来源会显示在这里。";
-  byId("ask-status").textContent = "本地 Qwen · 每个事实必须通过来源校验";
+  byId("ask-status").textContent = "本地 Qwen · 每个事实必须通过来源校验 · Ctrl+Enter 发送";
 }
 
 byId("new-qa-session").onclick = () => { resetQaSession(); loadQaSessions().catch((error) => showToast(error.message, true)); };
 
+byId("clear-qa-sessions").onclick = async () => {
+  if (!window.confirm("清空全部本地问答历史？知识库、索引和原始文件都不会受影响。")) return;
+  const output = await api("/api/delete-all-qa-sessions", {method: "POST", body: JSON.stringify({confirmation: "delete-all-local-qa-history"})});
+  resetQaSession();
+  await loadQaSessions();
+  showToast(`已清空 ${output.sessions} 个会话、${output.turns} 轮问答`);
+};
+
 byId("ask-form").addEventListener("submit", async (event) => {
   event.preventDefault();
+  const button = event.target.querySelector("button");
+  setButtonBusy(button, true, "回答中…");
   const form = new FormData(event.target);
   const question = String(form.get("question"));
   const sourceId = String(form.get("source_id"));
@@ -443,17 +535,28 @@ byId("ask-form").addEventListener("submit", async (event) => {
     byId("citations").className = "citations empty-evidence";
     byId("citations").textContent = "正在寻找可靠来源…";
     const output = await api("/api/ask", {method: "POST", body: JSON.stringify({source_id: sourceId, query: question, file_type: form.get("file_type") || null, session_id: currentQaSessionId})});
-    currentQaSessionId = output.session_id;
+    rememberQaSession(output.session_id);
     currentQaTurns.push({...output, question, source_scope: sourceId});
     renderQaTurns();
     renderQaCitations(currentQaTurns.at(-1));
-    status.textContent = output.insufficient_evidence ? "现有资料不足，系统已安全停止。" : "回答已通过引用与证据检查。";
+    status.textContent = output.insufficient_evidence
+      ? (output.validation?.partial_answer_available ? "已保留通过校验的段落；未支持内容可在后台响应中审查。" : "现有资料不足，系统已安全停止。")
+      : "回答已通过引用与证据检查。";
     event.target.reset();
     fillSourceSelect(byId("ask-source"), sourceId);
     await loadQaSessions();
   } catch (error) {
     status.textContent = `本地问答暂不可用：${error.message}`;
     status.className = "inline-status error";
+  } finally {
+    setButtonBusy(button, false);
+  }
+});
+
+byId("ask-form").elements.question.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+    event.preventDefault();
+    byId("ask-form").requestSubmit();
   }
 });
 
@@ -537,9 +640,17 @@ byId("chat-import").addEventListener("submit", async (event) => {
 async function sourceAction(path, message) {
   const id = byId("sources").value;
   if (!id) throw new Error("请先选择数据源");
+  const buttonByPath = {"/api/sync": "sync", "/api/index": "index", "/api/vector-index": "vector-index"};
+  const button = byId(buttonByPath[path]);
+  setButtonBusy(button, true, path === "/api/sync" ? "同步中…" : "处理中…");
   byId("message").textContent = message;
-  const output = await api(path, {method: "POST", body: JSON.stringify({source_id: id})});
-  await loadAll(); return output;
+  try {
+    const output = await api(path, {method: "POST", body: JSON.stringify({source_id: id})});
+    await loadAll();
+    return output;
+  } finally {
+    setButtonBusy(button, false);
+  }
 }
 
 byId("sync").onclick = () => sourceAction("/api/sync", "正在安全扫描并同步…").then((output) => { showSyncWarnings(output); showToast(output.skipped ? `同步完成，隔离 ${output.skipped} 个文件` : "同步完成"); }).catch((error) => { byId("message").textContent = `同步已回滚：${error.message}`; });
@@ -626,7 +737,11 @@ byId("command-input").addEventListener("keydown", (event) => { if (event.key ===
 
 switchView(location.hash.slice(1) || "home");
 loadAll().catch((error) => showToast(`无法读取本地状态：${error.message}`, true));
-loadQaSessions().catch((error) => showToast(`无法读取本地会话：${error.message}`, true));
+if (currentQaSessionId) {
+  loadQaSession(currentQaSessionId).catch(() => { resetQaSession(); return loadQaSessions(); });
+} else {
+  loadQaSessions().catch((error) => showToast(`无法读取本地会话：${error.message}`, true));
+}
 loadManagedBackups().catch((error) => showToast(`无法读取本地备份：${error.message}`, true));
 loadCommonFolders().catch((error) => showToast(`无法读取常用目录状态：${error.message}`, true));
 diagnose();

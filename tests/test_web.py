@@ -82,6 +82,7 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("Excel XLSX", page)
         self.assertIn("PowerPoint PPTX", page)
         self.assertIn('/assets/app.css', page)
+        self.assertIn('/assets/interactions.css', page)
         self.assertIn('/assets/app.js', page)
         result = self._get_json(f"/api/source/{self.source_id}")
         encoded = json.dumps(result)
@@ -98,6 +99,10 @@ class WebAcceptanceTests(unittest.TestCase):
 
         with urlopen(self.base_url + "/assets/app.css", timeout=2) as response:  # noqa: S310
             self.assertIn(".home-hero", response.read().decode())
+        with urlopen(  # noqa: S310 - fixed loopback URL
+            self.base_url + "/assets/interactions.css", timeout=2
+        ) as response:
+            self.assertIn(".network-progress", response.read().decode())
         with urlopen(self.base_url + "/assets/app.js", timeout=2) as response:  # noqa: S310
             script = response.read().decode()
             self.assertIn("runSearch", script)
@@ -338,6 +343,8 @@ class WebAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(result["answer"], "secret body[来源 1]。")
         self.assertFalse(result["insufficient_evidence"])
+        self.assertEqual(result["raw_model_answer"], "secret body[来源 1]。")
+        self.assertTrue(result["validation"]["passed"])
         self.assertEqual(result["citations"][0]["title"], "visible-name.txt")
         self.assertEqual(result["prompt_tokens"], 12)
         session_id = str(result["session_id"])
@@ -370,6 +377,17 @@ class WebAcceptanceTests(unittest.TestCase):
             {"session_id": session_id, "confirmation": session_id[-8:]},
         )
         self.assertEqual(deleted["turns"], 2)
+
+    def test_clear_all_qa_history_requires_confirmation(self) -> None:
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json("/api/delete-all-qa-sessions", {"confirmation": "wrong"})
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+        removed = self._post_json(
+            "/api/delete-all-qa-sessions",
+            {"confirmation": "delete-all-local-qa-history"},
+        )
+        self.assertEqual(removed, {"sessions": 0, "turns": 0})
 
     def test_cross_source_answer_authorizes_and_preserves_citation_source(self) -> None:
         second_root = self.base / "answer-source"

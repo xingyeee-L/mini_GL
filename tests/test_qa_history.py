@@ -77,6 +77,25 @@ class LocalQaHistoryTests(unittest.TestCase):
                 self.assertEqual(removed["turns"], 2)
                 self.assertEqual(reopened.list_qa_sessions(), [])
 
+    def test_delete_all_sessions_only_clears_local_qa_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            root = base / "source"
+            root.mkdir()
+            with SQLiteStore(base / "state.sqlite3") as store:
+                source = IngestionService(store).register(root)
+                for _ in range(2):
+                    store.save_qa_turn(
+                        session_id=None, source_scope=source.source_id,
+                        question="测试问题", answer="证据不足", citations=[],
+                        insufficient_evidence=True, model=None, retrieval_ms=0,
+                        generation_ms=0, prompt_tokens=None, completion_tokens=None,
+                    )
+                removed = store.delete_all_qa_sessions()
+                self.assertEqual(removed, {"sessions": 2, "turns": 2})
+                self.assertEqual(store.list_qa_sessions(), [])
+                self.assertEqual(store.get_source(source.source_id).source_id, source.source_id)
+
     def test_invalid_session_identifier_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             with SQLiteStore(Path(temporary) / "state.sqlite3") as store:

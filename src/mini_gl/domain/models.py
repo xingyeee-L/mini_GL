@@ -78,3 +78,5 @@ class GroundedAnswer:
     generation_ms: float
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    raw_model_answer: str | None = None
+    validation: dict[str, Any] = field(default_factory=dict)

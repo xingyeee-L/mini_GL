@@ -6,8 +6,9 @@
   <meta name="mini-gl-token" content="__TOKEN__">
   <title>mini_GL · 本地知识工作台</title>
   <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/interactions.css">
 </head>
-<body>
+<body><div class="network-progress" aria-hidden="true"></div>
   <div class="app-shell">
     <aside class="sidebar">
       <a class="brand" href="#home" aria-label="mini_GL 首页">
@@ -110,9 +111,9 @@
                 <textarea name="question" required maxlength="500" rows="2" placeholder="例如：这个项目如何保护原始文件？"></textarea>
                 <div><select id="ask-source" name="source_id" aria-label="问答数据源"></select><select name="file_type" aria-label="限定文件类型"><option value="">全部类型</option><option value=".pdf">PDF</option><option value=".docx">Word DOCX</option><option value=".xlsx">Excel XLSX</option><option value=".pptx">PowerPoint PPTX</option><option value=".txt">TXT</option><option value=".md">Markdown</option><option value=".csv">CSV</option><option value=".json">JSON</option><option value=".html">HTML</option></select><button class="primary">发送 ↑</button></div>
               </form>
-              <p id="ask-status" class="inline-status" aria-live="polite">本地 Qwen · 每个事实必须通过来源校验</p>
+              <p id="ask-status" class="inline-status" aria-live="polite">本地 Qwen · 每个事实必须通过来源校验 · Ctrl+Enter 发送</p>
             </section>
-            <aside class="evidence-panel surface"><div class="section-heading compact"><div><h2>本地会话</h2><p>保存在当前 SQLite，可随时单独删除</p></div><button id="new-qa-session" class="secondary">＋ 新会话</button></div><div id="qa-sessions" class="qa-sessions"><p class="muted">正在读取本地历史…</p></div><div class="divider"><span>当前回答的证据</span></div><div class="section-heading compact"><div><h2>证据与来源</h2><p>点击来源可查看授权快照</p></div></div><div id="citations" class="citations empty-evidence">回答后，相关来源会显示在这里。</div></aside>
+            <aside class="evidence-panel surface"><div class="section-heading compact"><div><h2>本地会话</h2><p>刷新页面后仍会接着当前会话</p></div><div class="qa-history-actions"><button id="new-qa-session" class="secondary">＋ 新会话</button><button id="clear-qa-sessions" class="danger-ghost">清空历史</button></div></div><div id="qa-sessions" class="qa-sessions"><p class="muted">正在读取本地历史…</p></div><div class="divider"><span>当前回答的证据</span></div><div class="section-heading compact"><div><h2>证据与来源</h2><p>点击来源可查看授权快照</p></div></div><div id="citations" class="citations empty-evidence">回答后，相关来源会显示在这里。</div></aside>
           </div>
         </section>
 
