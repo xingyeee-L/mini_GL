@@ -260,7 +260,7 @@ function showSyncWarnings(output) {
   const title = document.createElement("strong");
   title.textContent = `${output.skipped} 个文件或目录因安全边界被跳过，其他文件已正常同步：`;
   const list = document.createElement("ul");
-  const reasons = {unsupported_text_encoding: "编码不受支持", maximum_recursion_depth: "超过递归深度上限", maximum_file_size: "超过 10 MiB 单文件上限"};
+  const reasons = {unsupported_text_encoding: "编码不受支持", maximum_recursion_depth: "超过递归深度上限", maximum_file_size: "超过 10 MiB 单文件上限", pdf_parse_rejected: "PDF 不完整、损坏或不符合安全规范", docx_parse_rejected: "DOCX 损坏或不符合安全规范", office_parse_rejected: "Office 文件类型或包结构不符合安全规范", parser_safety_rejection: "内容格式不符合安全解析规范"};
   output.warnings.forEach((warning) => { const item = document.createElement("li"); const size = warning.size == null ? "" : ` · ${(warning.size / 1024 / 1024).toFixed(1)} MiB`; item.textContent = `${warning.relative_path} · ${reasons[warning.reason] || warning.reason}${size}`; list.append(item); });
   box.replaceChildren(title, list);
   box.hidden = false;

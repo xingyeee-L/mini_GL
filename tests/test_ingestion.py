@@ -12,7 +12,6 @@ from tests._docx_fixture import write_docx
 
 from mini_gl.connectors.base import ChangeKind
 from mini_gl.ingestion import DEFAULT_EXTENSIONS, IngestionService
-from mini_gl.parsers.docx import DocxParseError
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -168,12 +167,11 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(upgraded.max_file_size, 1_024)
         self.assertEqual(upgraded.max_depth, 2)
 
-    def test_unsafe_docx_rolls_back_without_false_deletions(self) -> None:
+    def test_unsafe_docx_is_quarantined_without_false_deletions(self) -> None:
         original = self.root / "keep.txt"
         original.write_text("fictional stable content", encoding="utf-8")
         source = self.service.register(self.root)
         self.service.sync(source.source_id)
-        original.unlink()
         unsafe = self.root / "unsafe.docx"
         write_docx(
             unsafe,
@@ -185,10 +183,11 @@ class IngestionTests(unittest.TestCase):
             ),
         )
 
-        with self.assertRaises(DocxParseError):
-            self.service.sync(source.source_id)
+        result = self.service.sync(source.source_id)
 
         self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(result["warnings"][0]["reason"], "docx_parse_rejected")
         self.assertEqual(
             self.store.connection.execute(
                 "SELECT COUNT(*) FROM change_events WHERE kind='deleted'"
@@ -291,6 +290,22 @@ class IngestionTests(unittest.TestCase):
             "SELECT content FROM documents WHERE title='large.txt'"
         ).fetchone()[0]
         self.assertEqual(stored, "small")
+
+    def test_malformed_pdf_and_office_files_are_quarantined(self) -> None:
+        (self.root / "usable.txt").write_text("usable", encoding="utf-8")
+        (self.root / "incomplete.pdf").write_bytes(b"%PDF-1.7 incomplete")
+        (self.root / "wrong-package.xlsx").write_bytes(b"not an office package")
+        source = self.service.register(self.root)
+
+        result = self.service.sync(source.source_id)
+
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["skipped"], 2)
+        self.assertEqual(
+            {warning["reason"] for warning in result["warnings"]},
+            {"pdf_parse_rejected", "office_parse_rejected"},
+        )
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
 
     def test_interrupted_run_is_recovered(self) -> None:
         source = self.service.register(self.root)

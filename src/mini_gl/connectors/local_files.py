@@ -9,8 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from mini_gl.domain.models import SourceDocument
+from mini_gl.parsers.docx import DocxParseError
 from mini_gl.parsers.local import parse_local_file
-from mini_gl.parsers.text import UnsupportedTextEncodingError
+from mini_gl.parsers.office import OfficeParseError
+from mini_gl.parsers.pdf import PdfParseError
+from mini_gl.parsers.structured import StructuredTextParseError
+from mini_gl.parsers.text import TextParseError, UnsupportedTextEncodingError
 from mini_gl.security.paths import FileSizeExceededError, PathPolicy, PathPolicyError
 
 
@@ -112,6 +116,29 @@ class LocalFileConnector:
                         object_id,
                         relative,
                         "unsupported_text_encoding",
+                        authorized.stat().st_size,
+                    )
+                )
+                continue
+            except (
+                DocxParseError,
+                OfficeParseError,
+                PdfParseError,
+                StructuredTextParseError,
+                TextParseError,
+            ) as exc:
+                reason = "parser_safety_rejection"
+                if isinstance(exc, PdfParseError):
+                    reason = "pdf_parse_rejected"
+                elif isinstance(exc, DocxParseError):
+                    reason = "docx_parse_rejected"
+                elif isinstance(exc, OfficeParseError):
+                    reason = "office_parse_rejected"
+                skipped.append(
+                    SkippedFile(
+                        object_id,
+                        relative,
+                        reason,
                         authorized.stat().st_size,
                     )
                 )
