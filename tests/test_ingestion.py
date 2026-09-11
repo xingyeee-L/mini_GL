@@ -6,12 +6,14 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tests._common_file_fixtures import write_pdf, write_pptx, write_xlsx
 from tests._docx_fixture import write_docx
 
 from mini_gl.connectors.base import ChangeKind
 from mini_gl.ingestion import DEFAULT_EXTENSIONS, IngestionService
+from mini_gl.security.paths import PathPolicy
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -304,6 +306,34 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(
             {warning["reason"] for warning in result["warnings"]},
             {"pdf_parse_rejected", "office_parse_rejected"},
+        )
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
+
+    def test_reparse_subtree_is_not_followed_and_does_not_false_delete(self) -> None:
+        linked = self.root / "node_modules"
+        linked.mkdir()
+        document = linked / "package.txt"
+        document.write_text("prior safe snapshot", encoding="utf-8")
+        source = self.service.register(self.root)
+        self.service.sync(source.source_id)
+        original_check = PathPolicy._is_link_or_reparse
+
+        def reports_reparse(path: Path) -> bool:
+            return path == linked or original_check(path)
+
+        with patch.object(PathPolicy, "_is_link_or_reparse", side_effect=reports_reparse):
+            result = self.service.sync(source.source_id)
+
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(
+            result["warnings"],
+            [
+                {
+                    "relative_path": "node_modules",
+                    "reason": "link_or_reparse_point",
+                }
+            ],
         )
         self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
 

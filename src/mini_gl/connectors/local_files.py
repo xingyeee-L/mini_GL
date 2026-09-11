@@ -76,8 +76,18 @@ class LocalFileConnector:
             raise PathPolicyError(f"Unable to scan directory: {directory}") from exc
         for entry in entries:
             path = Path(entry.path)
+            relative = path.relative_to(self.root).as_posix()
             if self.policy._is_link_or_reparse(path):
-                raise PathPolicyError(f"Links and reparse points are not allowed: {path}")
+                is_directory = entry.is_dir(follow_symlinks=False)
+                object_id = None
+                if not is_directory and path.suffix.lower() in {
+                    ext.lower() for ext in self.policy.allowed_extensions
+                }:
+                    object_id = object_id_for(self.source_id, relative)
+                skipped.append(
+                    SkippedFile(object_id, relative, "link_or_reparse_point")
+                )
+                continue
             if entry.is_dir(follow_symlinks=False):
                 if depth >= self.policy.max_depth:
                     skipped.append(
@@ -94,7 +104,6 @@ class LocalFileConnector:
                 continue
             if path.suffix.lower() not in {ext.lower() for ext in self.policy.allowed_extensions}:
                 continue
-            relative = path.relative_to(self.root).as_posix()
             object_id = object_id_for(self.source_id, relative)
             try:
                 authorized = self.policy.authorize(path)

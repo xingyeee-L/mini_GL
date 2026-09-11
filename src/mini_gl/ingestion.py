@@ -53,7 +53,9 @@ class IngestionService:
                     retained_path_prefixes={
                         item.relative_path
                         for item in scan.skipped
-                        if item.reason == "maximum_recursion_depth"
+                        if item.object_id is None
+                        and item.reason
+                        in {"maximum_recursion_depth", "link_or_reparse_point"}
                     },
                 )
             )
