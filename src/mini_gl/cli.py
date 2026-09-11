@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         "desktop", help="Start mini_GL and open the system browser"
     )
     desktop.add_argument("--port", type=int, default=8765)
+    product_status_parser = subparsers.add_parser(
+        "product-status", help="Show desktop product readiness without reading source content"
+    )
+    uninstall_preview = subparsers.add_parser(
+        "uninstall-preview", help="List application-owned data without deleting anything"
+    )
     chat_import = subparsers.add_parser(
         "chat-import", help="Import a provider-neutral versioned chat JSON export"
     )
@@ -137,6 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
         ask,
         serve,
         desktop,
+        product_status_parser,
+        uninstall_preview,
         chat_import,
         chat_convert,
         backup,
@@ -159,6 +167,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 desktop(args.db, args.port)
             else:
                 serve(args.db, args.host, args.port)
+            return 0
+        if args.command in {"product-status", "uninstall-preview"}:
+            from mini_gl.product import product_status, uninstall_inventory
+
+            result = (
+                product_status(args.db)
+                if args.command == "product-status"
+                else uninstall_inventory(args.db)
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0
         if args.command == "chat-convert":
             from mini_gl.adapters import convert_export

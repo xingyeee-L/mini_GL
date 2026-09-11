@@ -87,6 +87,17 @@ $env:PYTHONPATH = "src"
 python -m mini_gl desktop
 ```
 
+For a repeatable Windows setup, run `install-mini-gl.ps1`. It creates/reuses the project virtual
+environment, installs the locked runtime, registers the `mini-gl` command, and creates a Start Menu
+shortcut. Run `uninstall-mini-gl.ps1 -Preview` before uninstalling to review the exact
+application-owned paths; registered source folders are never included or deleted.
+Pass `-IncludeML` only when you explicitly want to install the larger locked local-embedding stack.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install-mini-gl.ps1
+.\uninstall-mini-gl.ps1 -Preview
+```
+
 The desktop workspace adds local runtime diagnostics, explicit real-folder authorization,
 cross-source search and grounded Q&A, plus verified backup/restore-to-new-path controls. Every
 cross-source read is authorized and audited per source, and citations retain their source ID.

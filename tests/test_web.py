@@ -243,6 +243,8 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("available", diagnostics["embedding"])
         self.assertTrue(diagnostics["document_formats"]["available"])
         self.assertEqual(diagnostics["document_formats"]["office_ooxml"], "built-in")
+        self.assertIn("desktop_ready", diagnostics["product"])
+        self.assertIn("backup_count", diagnostics["product"])
 
         backup = self.base / "backup.sqlite3"
         backup_result = self._post_json(

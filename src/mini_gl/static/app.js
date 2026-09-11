@@ -701,6 +701,8 @@ async function diagnose() {
     const ollama = output.ollama;
     const embedding = output.embedding;
     const formats = output.document_formats;
+    const product = output.product;
+    const checks = product.checks;
     container.replaceChildren(
       diagnosticItem("Python", output.python),
       diagnosticItem("SQLite", `${output.sqlite} · ${output.database_integrity}`, output.database_integrity === "ok"),
@@ -709,6 +711,15 @@ async function diagnose() {
       diagnosticItem("Qwen 模型", ollama.model_available ? "已安装" : "未检测到固定模型", ollama.model_available),
       diagnosticItem("数据规模", `${output.documents} 文档 · ${output.vector_chunks} 向量片段`),
       diagnosticItem("数据库", `${Math.ceil(output.database_size / 1024)} KiB`)
+    );
+    byId("product-summary").textContent = product.setup_complete
+      ? `mini_GL ${product.version} 已完成桌面准备`
+      : `mini_GL ${product.version} 可以启动，还有项目需要完成`;
+    byId("product-checklist").replaceChildren(
+      diagnosticItem("Windows 启动入口", checks.launcher_available ? "可用" : "缺失", checks.launcher_available),
+      diagnosticItem("锁定运行依赖", checks.runtime_lock_available ? "可用" : "缺失", checks.runtime_lock_available),
+      diagnosticItem("应用数据库", checks.database_initialized ? "已初始化" : "首次启动时创建", true),
+      diagnosticItem("安全备份", product.backup_count ? `${product.backup_count} 份 · 最近 ${product.latest_backup}` : "尚未创建，建议立即备份", product.backup_count > 0)
     );
     byId("bge-model-status").textContent = embedding.available ? "● 本地模型目录可用" : "! 未找到本地模型目录";
     byId("qwen-model-status").textContent = ollama.model_available ? "● Ollama 与固定模型可用" : (ollama.reachable ? "! Ollama 已启动，但固定模型缺失" : "! Ollama 服务未运行");

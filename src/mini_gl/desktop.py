@@ -10,6 +10,7 @@ import sqlite3
 from pathlib import Path
 
 from mini_gl.indexing.embeddings import BGE_DEFAULT_PATH
+from mini_gl.product import product_status
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -75,6 +76,7 @@ def runtime_diagnostics(store: SQLiteStore, database: Path) -> dict[str, object]
         "ollama": model,
         "embedding": embedding,
         "document_formats": document_formats,
+        "product": product_status(database),
         "ready": (
             integrity == "ok"
             and bool(model["reachable"])
