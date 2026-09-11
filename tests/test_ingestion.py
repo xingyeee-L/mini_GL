@@ -211,7 +211,13 @@ class IngestionTests(unittest.TestCase):
         self.assertEqual(result["skipped"], 1)
         self.assertEqual(
             result["warnings"],
-            [{"relative_path": "good.txt", "reason": "unsupported_text_encoding"}],
+            [
+                {
+                    "relative_path": "good.txt",
+                    "reason": "unsupported_text_encoding",
+                    "size": 3,
+                }
+            ],
         )
         self.assertEqual(
             self.store.connection.execute("SELECT COUNT(*) FROM file_state").fetchone()[0], 2
@@ -259,6 +265,32 @@ class IngestionTests(unittest.TestCase):
             ],
         )
         self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
+
+    def test_oversized_file_is_skipped_without_false_deleting_its_snapshot(self) -> None:
+        document = self.root / "large.txt"
+        document.write_text("small", encoding="utf-8")
+        source = self.service.register(self.root, max_file_size=8)
+        self.service.sync(source.source_id)
+        document.write_bytes(b"x" * 9)
+
+        result = self.service.sync(source.source_id)
+
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(
+            result["warnings"],
+            [
+                {
+                    "relative_path": "large.txt",
+                    "reason": "maximum_file_size",
+                    "size": 9,
+                }
+            ],
+        )
+        stored = self.store.connection.execute(
+            "SELECT content FROM documents WHERE title='large.txt'"
+        ).fetchone()[0]
+        self.assertEqual(stored, "small")
 
     def test_interrupted_run_is_recovered(self) -> None:
         source = self.service.register(self.root)

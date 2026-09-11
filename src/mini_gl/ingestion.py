@@ -59,10 +59,16 @@ class IngestionService:
             )
             if scan.skipped:
                 result["skipped"] = len(scan.skipped)
-                result["warnings"] = [
-                    {"relative_path": item.relative_path, "reason": item.reason}
-                    for item in scan.skipped
-                ]
+                warnings: list[dict[str, object]] = []
+                for item in scan.skipped:
+                    warning: dict[str, object] = {
+                        "relative_path": item.relative_path,
+                        "reason": item.reason,
+                    }
+                    if item.size is not None:
+                        warning["size"] = item.size
+                    warnings.append(warning)
+                result["warnings"] = warnings
             return result
         except Exception as exc:
             self.store.fail_run(run_id, exc)

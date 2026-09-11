@@ -16,6 +16,10 @@ class PathPolicyError(ValueError):
     """Raised when a path is outside the configured read boundary."""
 
 
+class FileSizeExceededError(PathPolicyError):
+    """Raised before opening a regular file whose metadata exceeds the configured limit."""
+
+
 @dataclass(frozen=True, slots=True)
 class PathPolicy:
     roots: tuple[Path, ...]
@@ -80,6 +84,6 @@ class PathPolicy:
         if not stat.S_ISREG(info.st_mode):
             raise PathPolicyError("Only regular files are allowed")
         if info.st_size > self.max_file_size:
-            raise PathPolicyError("Maximum file size exceeded")
+            raise FileSizeExceededError("Maximum file size exceeded")
 
         return resolved

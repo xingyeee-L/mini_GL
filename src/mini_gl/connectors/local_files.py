@@ -11,7 +11,7 @@ from pathlib import Path
 from mini_gl.domain.models import SourceDocument
 from mini_gl.parsers.local import parse_local_file
 from mini_gl.parsers.text import UnsupportedTextEncodingError
-from mini_gl.security.paths import PathPolicy, PathPolicyError
+from mini_gl.security.paths import FileSizeExceededError, PathPolicy, PathPolicyError
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,6 +28,7 @@ class SkippedFile:
     object_id: str | None
     relative_path: str
     reason: str
+    size: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,14 +90,30 @@ class LocalFileConnector:
                 continue
             if path.suffix.lower() not in {ext.lower() for ext in self.policy.allowed_extensions}:
                 continue
-            authorized = self.policy.authorize(path)
-            relative = authorized.relative_to(self.root).as_posix()
+            relative = path.relative_to(self.root).as_posix()
             object_id = object_id_for(self.source_id, relative)
+            try:
+                authorized = self.policy.authorize(path)
+            except FileSizeExceededError:
+                skipped.append(
+                    SkippedFile(
+                        object_id,
+                        relative,
+                        "maximum_file_size",
+                        entry.stat(follow_symlinks=False).st_size,
+                    )
+                )
+                continue
             try:
                 parsed = parse_local_file(authorized)
             except UnsupportedTextEncodingError:
                 skipped.append(
-                    SkippedFile(object_id, relative, "unsupported_text_encoding")
+                    SkippedFile(
+                        object_id,
+                        relative,
+                        "unsupported_text_encoding",
+                        authorized.stat().st_size,
+                    )
                 )
                 continue
             info = parsed.stat_result
