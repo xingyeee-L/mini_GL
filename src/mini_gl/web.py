@@ -399,6 +399,11 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get("confirmation") != source_id[-8:]:
                         raise PermissionError("Derived-data deletion confirmation did not match")
                     self._json(store.delete_derived_data(source_id))
+                elif self.path == "/api/revoke-source":
+                    source_id = str(body["source_id"])
+                    if body.get("confirmation") != source_id[-8:]:
+                        raise PermissionError("Source removal confirmation did not match")
+                    self._json(store.revoke_source(source_id))
                 elif self.path == "/api/index":
                     self._json(LexicalSearchService(store).rebuild(str(body["source_id"])))
                 elif self.path == "/api/vector-index":

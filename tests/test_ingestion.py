@@ -13,7 +13,6 @@ from tests._docx_fixture import write_docx
 from mini_gl.connectors.base import ChangeKind
 from mini_gl.ingestion import DEFAULT_EXTENSIONS, IngestionService
 from mini_gl.parsers.docx import DocxParseError
-from mini_gl.parsers.text import TextParseError
 from mini_gl.storage.sqlite import SQLiteStore
 
 
@@ -197,19 +196,25 @@ class IngestionTests(unittest.TestCase):
             0,
         )
 
-    def test_failed_scan_rolls_back_and_never_emits_delete(self) -> None:
+    def test_unsupported_encoding_is_quarantined_without_losing_prior_snapshot(self) -> None:
         good = self.root / "good.txt"
         good.write_text("safe", encoding="utf-8")
         source = self.service.register(self.root)
         self.service.sync(source.source_id)
-        good.unlink()
-        (self.root / "broken.txt").write_bytes(b"\xff\xff\xff")
+        good.write_bytes(b"\xff\xff\xff")
+        added = self.root / "added.md"
+        added.write_text("# usable", encoding="utf-8")
 
-        with self.assertRaises(TextParseError):
-            self.service.sync(source.source_id)
+        result = self.service.sync(source.source_id)
 
+        self.assertEqual(result["created"], 1)
+        self.assertEqual(result["skipped"], 1)
         self.assertEqual(
-            self.store.connection.execute("SELECT COUNT(*) FROM file_state").fetchone()[0], 1
+            result["warnings"],
+            [{"relative_path": "good.txt", "reason": "unsupported_text_encoding"}],
+        )
+        self.assertEqual(
+            self.store.connection.execute("SELECT COUNT(*) FROM file_state").fetchone()[0], 2
         )
         self.assertEqual(
             self.store.connection.execute(
@@ -221,8 +226,39 @@ class IngestionTests(unittest.TestCase):
             self.store.connection.execute(
                 "SELECT status FROM sync_runs ORDER BY started_at DESC LIMIT 1"
             ).fetchone()[0],
-            "FAILED",
+            "SUCCEEDED",
         )
+        stored = self.store.connection.execute(
+            "SELECT content FROM documents WHERE title='good.txt'"
+        ).fetchone()[0]
+        self.assertEqual(stored, "safe")
+
+    def test_deep_subtree_is_skipped_without_false_deleting_its_snapshot(self) -> None:
+        deep = self.root / "level-one" / "level-two"
+        deep.mkdir(parents=True)
+        document = deep / "deep.txt"
+        document.write_text("retained deep content", encoding="utf-8")
+        source = self.service.register(self.root, max_depth=2)
+        self.service.sync(source.source_id)
+        with self.store.connection:
+            self.store.connection.execute(
+                "UPDATE sources SET max_depth=1 WHERE source_id=?", (source.source_id,)
+            )
+
+        result = self.service.sync(source.source_id)
+
+        self.assertEqual(result["deleted"], 0)
+        self.assertEqual(result["skipped"], 1)
+        self.assertEqual(
+            result["warnings"],
+            [
+                {
+                    "relative_path": "level-one/level-two",
+                    "reason": "maximum_recursion_depth",
+                }
+            ],
+        )
+        self.assertEqual(self.store.status(source.source_id)[0]["file_count"], 1)
 
     def test_interrupted_run_is_recovered(self) -> None:
         source = self.service.register(self.root)
@@ -317,7 +353,7 @@ class IngestionTests(unittest.TestCase):
         self.store = SQLiteStore(self.db)
         self.service = IngestionService(self.store)
         self.assertEqual(
-            self.store.connection.execute("PRAGMA user_version").fetchone()[0], 10
+            self.store.connection.execute("PRAGMA user_version").fetchone()[0], 11
         )
 
     @staticmethod

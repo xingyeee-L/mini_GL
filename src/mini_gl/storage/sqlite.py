@@ -30,6 +30,7 @@ class RegisteredSource:
     max_file_size: int
     max_depth: int
     allowed_extensions: frozenset[str]
+    source_type: str = "local_files"
     paused: bool = False
     last_successful_run_id: str | None = None
     last_successful_at: str | None = None
@@ -64,7 +65,7 @@ class SQLiteStore:
 
     def _migrate(self) -> None:
         version = self.connection.execute("PRAGMA user_version").fetchone()[0]
-        if version > 10:
+        if version > 11:
             raise RuntimeError(f"Database schema {version} is newer than this application")
         if version == 0:
             self.connection.executescript(
@@ -371,6 +372,29 @@ class SQLiteStore:
                 """
             )
             self.connection.commit()
+            version = 10
+        if version == 10:
+            columns = {
+                str(row["name"])
+                for row in self.connection.execute("PRAGMA table_info(sources)").fetchall()
+            }
+            if "source_type" not in columns:
+                self.connection.execute(
+                    "ALTER TABLE sources ADD COLUMN source_type TEXT NOT NULL "
+                    "DEFAULT 'local_files' CHECK(source_type IN ('local_files','chat_export'))"
+                )
+            self.connection.executescript(
+                """
+                UPDATE sources SET source_type='chat_export'
+                WHERE EXISTS (
+                    SELECT 1 FROM documents
+                    WHERE documents.source_id=sources.source_id
+                      AND documents.document_id LIKE 'chat:%'
+                );
+                PRAGMA user_version = 11;
+                """
+            )
+            self.connection.commit()
 
     def record_agent_decision(
         self,
@@ -639,7 +663,10 @@ class SQLiteStore:
         max_file_size: int,
         max_depth: int,
         extensions: frozenset[str],
+        source_type: str = "local_files",
     ) -> RegisteredSource:
+        if source_type not in {"local_files", "chat_export"}:
+            raise ValueError("Unsupported source type")
         root_text = str(root)
         existing = self.connection.execute(
             "SELECT * FROM sources WHERE root_path=?", (root_text,)
@@ -649,8 +676,8 @@ class SQLiteStore:
             with self.connection:
                 self.connection.execute(
                     "INSERT INTO sources(source_id,root_path,allowed_extensions,max_file_size,"
-                    "max_depth,created_at,last_successful_run_id,last_successful_at) "
-                    "VALUES(?,?,?,?,?,?,NULL,NULL)",
+                    "max_depth,created_at,last_successful_run_id,last_successful_at,source_type) "
+                    "VALUES(?,?,?,?,?,?,NULL,NULL,?)",
                     (
                         source_id,
                         root_text,
@@ -658,6 +685,7 @@ class SQLiteStore:
                         max_file_size,
                         max_depth,
                         utc_now(),
+                        source_type,
                     ),
                 )
         else:
@@ -684,6 +712,7 @@ class SQLiteStore:
             max_file_size=row["max_file_size"],
             max_depth=row["max_depth"],
             allowed_extensions=frozenset(json.loads(row["allowed_extensions"])),
+            source_type=str(row["source_type"]),
             paused=bool(row["paused"]),
             last_successful_run_id=row["last_successful_run_id"],
             last_successful_at=row["last_successful_at"],
@@ -797,7 +826,15 @@ class SQLiteStore:
             json.dumps(document.metadata, ensure_ascii=False, sort_keys=True),
         )
 
-    def apply_scan(self, run_id: str, source_id: str, files: list[ScannedFile]) -> dict[str, int]:
+    def apply_scan(
+        self,
+        run_id: str,
+        source_id: str,
+        files: list[ScannedFile],
+        *,
+        retained_object_ids: set[str] | None = None,
+        retained_path_prefixes: set[str] | None = None,
+    ) -> dict[str, int]:
         observed_at = utc_now()
         counts = {kind.value: 0 for kind in ChangeKind}
         with self.connection:
@@ -817,7 +854,14 @@ class SQLiteStore:
                     "SELECT * FROM file_state WHERE source_id=?", (source_id,)
                 )
             }
-            current_ids: set[str] = set()
+            current_ids: set[str] = set(retained_object_ids or ())
+            prefixes = tuple(f"{path.rstrip('/')}/" for path in retained_path_prefixes or ())
+            if prefixes:
+                current_ids.update(
+                    object_id
+                    for object_id, row in previous.items()
+                    if str(row["relative_path"]).startswith(prefixes)
+                )
             for item in files:
                 current_ids.add(item.object_id)
                 old = previous.get(item.object_id)

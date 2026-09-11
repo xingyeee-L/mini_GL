@@ -13,6 +13,10 @@ class TextParseError(ValueError):
     """Raised when a source cannot be read consistently or decoded safely."""
 
 
+class UnsupportedTextEncodingError(TextParseError):
+    """Raised only when stable bytes cannot be decoded by the local allowlist."""
+
+
 @dataclass(frozen=True, slots=True)
 class ParsedText:
     content: str
@@ -39,7 +43,9 @@ def _decode(raw: bytes) -> tuple[str, str]:
         except UnicodeDecodeError:
             return raw.decode("gb18030", errors="strict"), "gb18030"
     except UnicodeDecodeError as exc:
-        raise TextParseError("File is not valid UTF-8, BOM-marked UTF-16, or GB18030") from exc
+        raise UnsupportedTextEncodingError(
+            "File is not valid UTF-8, BOM-marked UTF-16, or GB18030"
+        ) from exc
 
 
 def parse_text(path: Path) -> ParsedText:

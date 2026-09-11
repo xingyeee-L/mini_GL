@@ -5,6 +5,7 @@ const byId = (id) => document.getElementById(id);
 let sources = [];
 let details = new Map();
 let schedules = new Map();
+let currentFiles = [];
 
 async function api(path, options = {}) {
   options.headers = {...(options.headers || {}), "X-Mini-GL-CSRF": token};
@@ -52,7 +53,7 @@ document.addEventListener("click", (event) => {
 byId("mobile-menu").onclick = () => document.querySelector(".sidebar").classList.toggle("open");
 
 function sourceKind(source) {
-  return source.allowed_extensions.includes(".json") ? "聊天记录" : "本地文件";
+  return source.source_type === "chat_export" ? "聊天记录" : "本地文件夹";
 }
 
 function sourceName(source) {
@@ -115,8 +116,41 @@ function makeLibraryCard(source, detail) {
   state.className = source.paused ? "paused" : "";
   state.textContent = source.paused ? "已暂停" : "● 正常";
   footer.append(stats, state);
-  card.append(icon, title, path, footer);
+  const actions = document.createElement("div");
+  actions.className = "library-actions";
+  const inspect = document.createElement("button");
+  inspect.className = "secondary";
+  inspect.textContent = "查看文件";
+  inspect.onclick = () => openSourceFiles(source.source_id);
+  const remove = document.createElement("button");
+  remove.className = "danger-ghost";
+  remove.textContent = "移除数据源";
+  remove.onclick = () => revokeSource(source.source_id);
+  actions.append(inspect, remove);
+  card.append(icon, title, path, footer, actions);
   return card;
+}
+
+function openSourceFiles(sourceId) {
+  switchView("console");
+  switchConsole("sources");
+  byId("sources").value = sourceId;
+  showSourceDetail();
+  byId("file-filter").focus();
+}
+
+async function revokeSource(sourceId) {
+  const source = sources.find((item) => item.source_id === sourceId);
+  if (!source) return;
+  const suffix = sourceId.slice(-8);
+  const answer = window.prompt(`将撤销“${sourceName(source)}”的授权，并删除 mini_GL 中的快照、索引与同步计划；原文件不会被删除。请输入 ${suffix} 确认：`);
+  if (answer !== suffix) return;
+  try {
+    await api("/api/revoke-source", {method: "POST", body: JSON.stringify({source_id: sourceId, confirmation: suffix})});
+    await loadAll(false);
+    await loadCommonFolders();
+    showToast("数据源已移除，原文件未修改");
+  } catch (error) { showToast(error.message, true); }
 }
 
 async function loadAll(keep = true) {
@@ -184,14 +218,8 @@ async function showSourceDetail() {
   details.set(id, detail);
   const eventCounts = counts(detail.events);
   Object.entries(eventCounts).forEach(([key, value]) => { byId(key).textContent = value; });
-  const eventMap = Object.fromEntries(detail.events.map((event) => [event.object_id, event.kind]));
-  byId("files").replaceChildren(...detail.files.map((file) => {
-    const row = document.createElement("tr");
-    [file.relative_path, `${file.size} B`, `${file.content_hash.slice(0, 12)}…`, eventMap[file.object_id] || "—"].forEach((value) => {
-      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
-    });
-    return row;
-  }));
+  currentFiles = detail.files;
+  renderFileRows();
   const source = sources.find((item) => item.source_id === id);
   byId("pause").textContent = source.paused ? "恢复数据源" : "暂停数据源";
   ["sync", "index", "vector-index"].forEach((key) => { byId(key).disabled = source.paused; });
@@ -205,6 +233,37 @@ async function showSourceDetail() {
   byId("schedule-status").textContent = schedule.frequency === "manual"
     ? "当前仅手动同步。"
     : `下次同步：${schedule.next_run_at ? new Date(schedule.next_run_at).toLocaleString() : "等待计算"}${schedule.last_status ? ` · 上次 ${schedule.last_status}` : ""}`;
+}
+
+function renderFileRows() {
+  const query = byId("file-filter").value.trim().toLocaleLowerCase();
+  const eventMap = Object.fromEntries((details.get(byId("sources").value)?.events || []).map((event) => [event.object_id, event.kind]));
+  const visible = currentFiles.filter((file) => file.relative_path.toLocaleLowerCase().includes(query));
+  byId("files").replaceChildren(...visible.map((file) => {
+    const row = document.createElement("tr");
+    const normalized = file.relative_path.replaceAll("\\", "/");
+    const split = normalized.lastIndexOf("/");
+    const folder = split < 0 ? "（根目录）" : normalized.slice(0, split);
+    const name = split < 0 ? normalized : normalized.slice(split + 1);
+    [folder, name, `${file.size} B`, `${file.content_hash.slice(0, 12)}…`, eventMap[file.object_id] || "—"].forEach((value) => {
+      const cell = document.createElement("td"); cell.textContent = value; row.append(cell);
+    });
+    return row;
+  }));
+}
+
+byId("file-filter").addEventListener("input", renderFileRows);
+
+function showSyncWarnings(output) {
+  const box = byId("sync-warnings");
+  if (!output.warnings?.length) { box.hidden = true; box.replaceChildren(); return; }
+  const title = document.createElement("strong");
+  title.textContent = `${output.skipped} 个文件或目录因安全边界被跳过，其他文件已正常同步：`;
+  const list = document.createElement("ul");
+  const reasons = {unsupported_text_encoding: "编码不受支持", maximum_recursion_depth: "超过递归深度上限"};
+  output.warnings.forEach((warning) => { const item = document.createElement("li"); item.textContent = `${warning.relative_path} · ${reasons[warning.reason] || warning.reason}`; list.append(item); });
+  box.replaceChildren(title, list);
+  box.hidden = false;
 }
 
 function createResultCard(result) {
@@ -483,7 +542,7 @@ async function sourceAction(path, message) {
   await loadAll(); return output;
 }
 
-byId("sync").onclick = () => sourceAction("/api/sync", "正在安全扫描并同步…").then(() => showToast("同步完成")).catch((error) => { byId("message").textContent = `同步已回滚：${error.message}`; });
+byId("sync").onclick = () => sourceAction("/api/sync", "正在安全扫描并同步…").then((output) => { showSyncWarnings(output); showToast(output.skipped ? `同步完成，隔离 ${output.skipped} 个文件` : "同步完成"); }).catch((error) => { byId("message").textContent = `同步已回滚：${error.message}`; });
 byId("index").onclick = () => sourceAction("/api/index", "正在重建关键词索引…").then(() => showToast("关键词索引完成")).catch((error) => showToast(error.message, true));
 byId("vector-index").onclick = () => sourceAction("/api/vector-index", "正在离线构建 BGE 向量索引…").then(() => showToast("BGE 向量索引完成")).catch((error) => showToast(error.message, true));
 byId("pause").onclick = async () => { try { const id = byId("sources").value; const source = sources.find((item) => item.source_id === id); await api("/api/source-pause", {method: "POST", body: JSON.stringify({source_id: id, paused: !source.paused})}); await loadAll(); showToast(source.paused ? "数据源已恢复" : "数据源已暂停"); } catch (error) { showToast(error.message, true); } };

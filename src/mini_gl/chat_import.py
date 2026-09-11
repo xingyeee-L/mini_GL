@@ -28,7 +28,7 @@ class ChatImportService:
         ).authorize(path)
         export = parse_chat_export(canonical)
         source = self.store.register_source(
-            canonical, MAX_CHAT_EXPORT_SIZE, 0, frozenset({".json"})
+            canonical, MAX_CHAT_EXPORT_SIZE, 0, frozenset({".json"}), "chat_export"
         )
         run_id = self.store.start_run(source.source_id)
         try:

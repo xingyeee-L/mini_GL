@@ -89,6 +89,8 @@ class WebAcceptanceTests(unittest.TestCase):
         self.assertIn("created", encoded)
         self.assertNotIn("secret body", encoded)
         self.assertEqual(result["index"], {"lexical_chunks": 0, "vector_chunks": 0})
+        sources = self._get_json("/api/sources")
+        self.assertEqual(sources[0]["source_type"], "local_files")
 
         runtime = self._get_json("/api/runtime")
         self.assertIn("127.0.0.1", str(runtime["network"]))
@@ -457,6 +459,24 @@ class WebAcceptanceTests(unittest.TestCase):
             {"source_id": self.source_id, "confirmation": self.source_id[-8:]},
         )
         self.assertEqual(deleted["documents"], 1)
+        self.assertTrue((self.root / "visible-name.txt").exists())
+
+    def test_library_can_revoke_source_without_deleting_original_files(self) -> None:
+        with self.assertRaises(HTTPError) as caught:
+            self._post_json(
+                "/api/revoke-source",
+                {"source_id": self.source_id, "confirmation": "wrong"},
+            )
+        self.assertEqual(caught.exception.code, 400)
+        caught.exception.close()
+
+        removed = self._post_json(
+            "/api/revoke-source",
+            {"source_id": self.source_id, "confirmation": self.source_id[-8:]},
+        )
+
+        self.assertEqual(removed["documents"], 1)
+        self.assertEqual(self._get_json("/api/sources"), [])
         self.assertTrue((self.root / "visible-name.txt").exists())
 
 

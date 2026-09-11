@@ -29,7 +29,7 @@ class IngestionService:
 
     def sync(
         self, source_id: str, *, after_scan: Callable[[], None] | None = None
-    ) -> dict[str, int]:
+    ) -> dict[str, object]:
         source = self.store.get_source(source_id)
         policy = PathPolicy(
             (source.root_path,),
@@ -39,10 +39,31 @@ class IngestionService:
         )
         run_id = self.store.start_run(source_id)
         try:
-            files = LocalFileConnector(source_id, source.root_path, policy).scan()
+            scan = LocalFileConnector(source_id, source.root_path, policy).scan()
             if after_scan is not None:
                 after_scan()
-            return self.store.apply_scan(run_id, source_id, files)
+            result: dict[str, object] = dict(
+                self.store.apply_scan(
+                    run_id,
+                    source_id,
+                    list(scan.files),
+                    retained_object_ids={
+                        item.object_id for item in scan.skipped if item.object_id is not None
+                    },
+                    retained_path_prefixes={
+                        item.relative_path
+                        for item in scan.skipped
+                        if item.reason == "maximum_recursion_depth"
+                    },
+                )
+            )
+            if scan.skipped:
+                result["skipped"] = len(scan.skipped)
+                result["warnings"] = [
+                    {"relative_path": item.relative_path, "reason": item.reason}
+                    for item in scan.skipped
+                ]
+            return result
         except Exception as exc:
             self.store.fail_run(run_id, exc)
             raise

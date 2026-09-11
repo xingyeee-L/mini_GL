@@ -10,6 +10,7 @@ from pathlib import Path
 
 from mini_gl.domain.models import SourceDocument
 from mini_gl.parsers.local import parse_local_file
+from mini_gl.parsers.text import UnsupportedTextEncodingError
 from mini_gl.security.paths import PathPolicy, PathPolicyError
 
 
@@ -20,6 +21,19 @@ class ScannedFile:
     document: SourceDocument
     size: int
     mtime_ns: int
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedFile:
+    object_id: str | None
+    relative_path: str
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
+class ScanResult:
+    files: tuple[ScannedFile, ...]
+    skipped: tuple[SkippedFile, ...]
 
 
 def object_id_for(source_id: str, relative_path: str) -> str:
@@ -33,14 +47,22 @@ class LocalFileConnector:
         self.root = policy.authorize_root(root)
         self.policy = policy
 
-    def scan(self) -> list[ScannedFile]:
+    def scan(self) -> ScanResult:
         found: list[ScannedFile] = []
-        self._scan_directory(self.root, 0, found)
-        return sorted(found, key=lambda item: item.relative_path.casefold())
+        skipped: list[SkippedFile] = []
+        self._scan_directory(self.root, 0, found, skipped)
+        return ScanResult(
+            tuple(sorted(found, key=lambda item: item.relative_path.casefold())),
+            tuple(sorted(skipped, key=lambda item: item.relative_path.casefold())),
+        )
 
-    def _scan_directory(self, directory: Path, depth: int, found: list[ScannedFile]) -> None:
-        if depth > self.policy.max_depth:
-            raise PathPolicyError("Maximum recursion depth exceeded")
+    def _scan_directory(
+        self,
+        directory: Path,
+        depth: int,
+        found: list[ScannedFile],
+        skipped: list[SkippedFile],
+    ) -> None:
         if self.policy._is_link_or_reparse(directory):
             raise PathPolicyError(f"Links and reparse points are not allowed: {directory}")
         try:
@@ -52,16 +74,31 @@ class LocalFileConnector:
             if self.policy._is_link_or_reparse(path):
                 raise PathPolicyError(f"Links and reparse points are not allowed: {path}")
             if entry.is_dir(follow_symlinks=False):
-                self._scan_directory(path, depth + 1, found)
+                if depth >= self.policy.max_depth:
+                    skipped.append(
+                        SkippedFile(
+                            None,
+                            path.relative_to(self.root).as_posix(),
+                            "maximum_recursion_depth",
+                        )
+                    )
+                    continue
+                self._scan_directory(path, depth + 1, found, skipped)
                 continue
             if not entry.is_file(follow_symlinks=False):
                 continue
             if path.suffix.lower() not in {ext.lower() for ext in self.policy.allowed_extensions}:
                 continue
             authorized = self.policy.authorize(path)
-            parsed = parse_local_file(authorized)
             relative = authorized.relative_to(self.root).as_posix()
             object_id = object_id_for(self.source_id, relative)
+            try:
+                parsed = parse_local_file(authorized)
+            except UnsupportedTextEncodingError:
+                skipped.append(
+                    SkippedFile(object_id, relative, "unsupported_text_encoding")
+                )
+                continue
             info = parsed.stat_result
             created = datetime.fromtimestamp(info.st_ctime, UTC)
             updated = datetime.fromtimestamp(info.st_mtime, UTC)
